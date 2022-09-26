@@ -618,7 +618,7 @@ func TestSnapshotRPC3B(t *testing.T) {
 			Put(cfg, ck1, strconv.Itoa(i), strconv.Itoa(i), nil, -1)
 		}
 		time.Sleep(electionTimeout)
-		Put(cfg, ck1, "b", "B", nil, -1)
+		Put(cfg, ck1, "b", "Accept", nil, -1)
 	}
 
 	// check that the majority partition has thrown away
@@ -636,7 +636,7 @@ func TestSnapshotRPC3B(t *testing.T) {
 		Put(cfg, ck1, "c", "C", nil, -1)
 		Put(cfg, ck1, "d", "D", nil, -1)
 		check(cfg, t, ck1, "a", "A")
-		check(cfg, t, ck1, "b", "B")
+		check(cfg, t, ck1, "b", "Accept")
 		check(cfg, t, ck1, "1", "1")
 		check(cfg, t, ck1, "49", "49")
 	}
