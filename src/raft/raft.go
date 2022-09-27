@@ -71,7 +71,8 @@ type LogEntry struct {
 type peerInfo struct {
 	index int
 	//0 未进行，1正在进行
-	syncLock int32
+	syncLock        int32
+	updateIndexLock sync.Mutex
 }
 
 //
@@ -87,17 +88,21 @@ type Raft struct {
 
 	applyIndex   int
 	applyCh      chan ApplyMsg
-	peerInfos    []peerInfo
+	peerInfos    []*peerInfo
 	role         int32
 	lastCallTime time.Time
 	vote         int32 //得票数
 	term         int32
-	logs         []LogEntry
+	logs         []*LogEntry
 	commitIndex  int32
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+	RequestVoteCount  int32
+	HeartbeatCount    int32
+	CommitLogCount    int32
+	SyncLogEntryCount int32
 }
 
 // return currentTerm and whether this server
@@ -168,15 +173,19 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := int(rf.term)
-	isLeader := atomic.LoadInt32(&rf.role) == leader
+	isLeader := rf.isLeader()
 
 	if isLeader {
-		rf.mu.Lock()
-		defer rf.mu.Unlock()
-		index = len(rf.logs)
-		entry := LogEntry{index: index, term: term, command: command}
-		rf.logs = append(rf.logs, entry)
-		rf.logs[index].syncCount = 1
+		entry := LogEntry{term: term, command: command, syncCount: 1}
+		index = rf.appendLog(&entry)
+
+		logger.Infof("leader[%d]收到日志[index:%d,value:%v]添加请求", rf.me, index, commandToString(command))
+		for i := range rf.peers {
+			if i != rf.me {
+				//go rf.sendLogEntry(i, &entry)
+			}
+		}
+
 	}
 
 	return index + 1, term, isLeader
@@ -203,15 +212,6 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-func (rf *Raft) isLeader() bool {
-	return atomic.LoadInt32(&rf.role) == leader
-}
-
-func (rf *Raft) lastTime() time.Time {
-	//todo lock
-	return rf.lastCallTime
-}
-
 // The ticker go routine starts a new election if this peer hasn't received
 // heartsbeats recently.
 func (rf *Raft) ticker() {
@@ -220,12 +220,12 @@ func (rf *Raft) ticker() {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		//logger.Debugf("raft[%d-%d] ms call time:%v", rf.me, rf.role, rf.lastCallTime)
-		if rf.role == follower || rf.role == candidate {
+		if !rf.isLeader() {
 			if !time.Now().After(rf.lastTime().Add(time.Duration(ms) * time.Millisecond)) {
 				continue
 			}
 
-			if !(atomic.CompareAndSwapInt32(&rf.role, follower, candidate) || atomic.CompareAndSwapInt32(&rf.role, candidate, candidate)) {
+			if !(rf.setRole(follower, candidate) || rf.setRole(candidate, candidate)) {
 				continue
 			}
 
@@ -264,14 +264,23 @@ func (rf *Raft) messageLoop() {
 		rf.mu.Lock()
 		for i := rf.applyIndex + 1; i <= int(atomic.LoadInt32(&rf.commitIndex)); i++ {
 			item := rf.logs[i]
-			if item.command == nil {
-				logger.Errorf("raft[%d]出现意想不到的情况:%+v   %v", rf.me, item, rf.logs)
-			}
+			//if item.command == nil {
+			//	logger.Errorf("raft[%d]出现意想不到的情况:%+v   %v", rf.me, item, rf.logs)
+			//}
 			rf.applyCh <- ApplyMsg{CommandValid: true, Command: item.command, CommandIndex: item.index + 1}
 			logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.index+1)
 			rf.applyIndex++
 		}
 		rf.mu.Unlock()
+	}
+}
+
+func (rf *Raft) flushLog(commitIndex int) {
+	for i := rf.applyIndex + 1; i <= commitIndex; i++ {
+		item := rf.logs[i]
+		rf.applyCh <- ApplyMsg{CommandValid: true, Command: item.command, CommandIndex: item.index + 1}
+		logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.index+1)
+		rf.applyIndex++
 	}
 }
 
@@ -297,7 +306,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 	rf.role = follower
 	rf.commitIndex = -1
-	rf.logs = []LogEntry{}
+	rf.logs = []*LogEntry{}
 	// Your initialization code here (2A, 2B, 2C).
 
 	// initialize from state persisted before a crash
@@ -306,7 +315,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start ticker goroutine to start elections
 	go rf.ticker()
 	go rf.heartbeatLoop()
-	go rf.messageLoop()
+	//go rf.messageLoop()
 
 	return rf
 }

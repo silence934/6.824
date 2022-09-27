@@ -33,7 +33,7 @@ func init() {
 	})
 
 	atomicLevel = zap.NewAtomicLevel()
-	atomicLevel.SetLevel(zapcore.InfoLevel)
+	atomicLevel.SetLevel(zapcore.DebugLevel)
 	// 最后创建具体的Logger
 	core := zapcore.NewCore(encoder, zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout)), atomicLevel)
 
