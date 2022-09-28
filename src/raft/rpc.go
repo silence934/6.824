@@ -65,10 +65,44 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 
 }
 
-//提交的条件：
-//1.日志同步次数超过raft数量的一半
-//2.这个日志是最后一条日志
-//3.这个日志的term是当前term
+func (rf *Raft) CheckLogs(args *RequestHeartbeatArgs, reply *RequestHeartbeatReply) {
+	atomic.AddInt32(&rf.HeartbeatCount, 1)
+
+	if !rf.isFollower() && !rf.lockSyncLog() {
+		reply.Accept = false
+		return
+	}
+	defer rf.unlockSyncLog()
+
+	// Your code here (2A, 2B).
+	if rf.term <= args.Term {
+		rf.lastCallTime = time.Now()
+		rf.role = follower
+		rf.term = args.Term
+
+		logIndex := args.LogIndex
+		logTerm := args.LogTerm
+		reply.Accept = true
+
+		logger.Infof("我方[%d]日志与对方比较  我方长度:%d  对方index:%d", rf.me, len(rf.logs), logIndex)
+
+		if logIndex == -1 {
+			reply.LogIsAlignment = len(rf.logs) == 0
+		} else if logIndex >= len(rf.logs) {
+			reply.LogIsAlignment = false
+			reply.LogLength = len(rf.logs)
+		} else if rf.logs[logIndex].term == logTerm {
+			reply.LogIsAlignment = true
+			rf.commitIndex = args.CommitIndex
+		} else {
+			reply.LogIsAlignment = false
+		}
+	} else {
+		reply.Accept = false
+	}
+
+}
+
 func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 
 	rf.mu.Lock()
@@ -96,13 +130,14 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 func (rf *Raft) SyncLogEntry(args *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
 
-	if !rf.isFollower() {
+	if !rf.isFollower() || !rf.lockSyncLog() {
 		reply.Accept = false
 		return
 	}
+	defer rf.unlockSyncLog()
+
 	rf.lastCallTime = time.Now()
-	rf.syncLogLock.Lock()
-	defer rf.syncLogLock.Unlock()
+
 	length := len(rf.logs)
 	index := args.Index
 	preTerm := args.PreLogTerm
@@ -114,6 +149,44 @@ func (rf *Raft) SyncLogEntry(args *RequestSyncLogArgs, reply *RequestSyncLogRepl
 		//rf.applyCh <- ApplyMsg{CommandValid: true, Command: args.Command, CommandIndex: index + 1}
 	} else {
 		rf.logs[index] = &LogEntry{index: index, command: args.Command, term: args.Term}
+	}
+
+}
+
+func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLogReply) {
+	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
+
+	//logger.Infof("raft[%d]收到[%d]日志添加请求 leng=%d", rf.me, req.Id, len(req.Args))
+
+	reply.Indexes = []*int{}
+	if !rf.isFollower() || req.Term < rf.term || !rf.lockSyncLog() {
+		return
+	}
+	defer rf.unlockSyncLog()
+
+	rf.lastCallTime = time.Now()
+
+	defer func() {
+		if err := recover(); err != nil {
+			logger.Errorf("出现错误:  原logs 长度=%d,\n接收到的数据:%v", len(rf.logs), req.Args)
+			panic(err)
+		}
+	}()
+
+	for _, args := range req.Args {
+		index := args.Index
+		preTerm := args.PreLogTerm
+
+		if len(rf.logs) < index || (index != 0 && rf.logs[index-1].term != preTerm) {
+			//要追加的日志下标在之前的最后一个日志还要后边：不合法的
+			//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
+			return
+		} else if len(rf.logs) == index {
+			rf.logs = append(rf.logs, &LogEntry{index: index, command: args.Command, term: args.Term})
+		} else {
+			rf.logs[index] = &LogEntry{index: index, command: args.Command, term: args.Term}
+		}
+		reply.Indexes = append(reply.Indexes, &index)
 	}
 
 }

@@ -47,3 +47,26 @@ func (rf *Raft) appendLog(entry *LogEntry) int {
 
 	return index
 }
+
+func (rf *Raft) lockSyncLog() bool {
+	return atomic.CompareAndSwapInt32(&rf.syncLogLock, 0, 1)
+}
+
+func (rf *Raft) unlockSyncLog() {
+	rf.syncLogLock = 0
+}
+
+func (rf *Raft) lockCheckLog(server int) bool {
+	b := atomic.CompareAndSwapInt32(&rf.peerInfos[server].checkLogsLock, 0, 1)
+	//logger.Infof("raft[%d] 锁定了 %d   %v", rf.me, server, b)
+	return b
+}
+
+func (rf *Raft) unlockCheckLog(server int) {
+	//logger.Infof("raft[%d] 解锁 %d", rf.me, server)
+	rf.peerInfos[server].checkLogsLock = 0
+}
+
+func (rf *Raft) syncCountAddGet(index int) int {
+	return int(atomic.AddInt32(&rf.logs[index].syncCount, 1))
+}

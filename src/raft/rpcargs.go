@@ -1,5 +1,7 @@
 package raft
 
+import "fmt"
+
 type RequestHeartbeatArgs struct {
 	// Your data here (2A, 2B).
 	Term int32
@@ -23,6 +25,10 @@ type RequestSyncLogArgs struct {
 	Index      int
 	Term       int
 	Command    interface{}
+}
+
+func (t *RequestSyncLogArgs) String() string {
+	return fmt.Sprintf("{Index:%d}", t.Index)
 }
 
 type RequestSyncLogReply struct {
@@ -62,4 +68,14 @@ type CommitLogArgs struct {
 type CommitLogReply struct {
 	// Your data here (2A).
 	Accept bool
+}
+
+type CoalesceSyncLogArgs struct {
+	Id   int
+	Term int32
+	Args []*RequestSyncLogArgs
+}
+
+type CoalesceSyncLogReply struct {
+	Indexes []*int
 }

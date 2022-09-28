@@ -69,17 +69,18 @@ type LogEntry struct {
 }
 
 type peerInfo struct {
-	index int
-	//0 未进行，1正在进行
-	syncLock        int32
+	serverId        int
+	index           int   //对方和自己相同的日志下标
+	checkLogsLock   int32 //0 未进行，1正在进行
 	updateIndexLock sync.Mutex
+	channel         chan RequestSyncLogArgs //日志同步缓存channel
 }
 
 //
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	syncLogLock sync.Mutex
+	syncLogLock int32
 	mu          sync.Mutex          // Lock to protect shared access to this peer's state
 	peers       []*labrpc.ClientEnd // RPC end points of all peers
 	persister   *Persister          // Object to hold this peer's persisted state
@@ -182,7 +183,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		logger.Infof("leader[%d]收到日志[index:%d,value:%v]添加请求", rf.me, index, commandToString(command))
 		for i := range rf.peers {
 			if i != rf.me {
-				//go rf.sendLogEntry(i, &entry)
+				rf.sendLogEntry(i, &entry)
 			}
 		}
 
@@ -315,6 +316,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start ticker goroutine to start elections
 	go rf.ticker()
 	go rf.heartbeatLoop()
+	go rf.logEntryLoop()
 	//go rf.messageLoop()
 
 	return rf

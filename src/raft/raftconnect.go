@@ -2,37 +2,9 @@ package raft
 
 import (
 	"sync/atomic"
+	"time"
 )
 
-//
-// example code to send a RequestVote RPC to a server.
-// server is the index of the target server in rf.peers[].
-// expects RPC arguments in args.
-// fills in *reply with RPC reply, so caller should
-// pass &reply.
-// the types of the args and reply passed to Call() must be
-// the same as the types of the arguments declared in the
-// handler function (including whether they are pointers).
-//
-// The labrpc package simulates a lossy network, in which servers
-// may be unreachable, and in which requests and replies may be lost.
-// Call() sends a request and waits for a reply. If a reply arrives
-// within a timeout interval, Call() returns true; otherwise
-// Call() returns false. Thus Call() may not return for a while.
-// A false return can be caused by a dead server, a live server that
-// can't be reached, a lost request, or a lost reply.
-//
-// Call() is guaranteed to return (perhaps after a delay) *except* if the
-// handler function on the server side does not return.  Thus there
-// is no need to implement your own timeouts around Call().
-//
-// look at the comments in ../labrpc/labrpc.go for more details.
-//
-// if you're having trouble getting RPC to work, check that you've
-// capitalized all field names in structs passed over RPC, and
-// that the caller passes the address of the reply struct with &, not
-// the struct itself.
-//
 func (rf *Raft) sendRequestVote(server int) bool {
 	commitLogTerm := -1
 	if int(rf.commitIndex) != -1 {
@@ -48,9 +20,11 @@ func (rf *Raft) sendRequestVote(server int) bool {
 		v := atomic.AddInt32(&rf.vote, 1)
 		if int(v) > len(rf.peers)/2 {
 			if rf.setRole(candidate, leader) {
-				rf.peerInfos = make([]*peerInfo, len(rf.peers))
-				for i := 0; i < len(rf.peerInfos); i++ {
-					rf.peerInfos[i] = &peerInfo{index: len(rf.logs) - 1, syncLock: 0}
+				if len(rf.peerInfos) == 0 {
+					rf.peerInfos = make([]*peerInfo, len(rf.peers))
+					for i := 0; i < len(rf.peerInfos); i++ {
+						rf.peerInfos[i] = &peerInfo{serverId: i, index: len(rf.logs) - 1, checkLogsLock: 0, channel: make(chan RequestSyncLogArgs, 20)}
+					}
 				}
 				logger.Infof("raft[%d] 成为leader,term:%d", rf.me, rf.term)
 			}
@@ -74,23 +48,20 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 
 	ok := rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
 
-	//peerIndex := rf.getPeerIndex(server)
 	if ok {
 		if !resp.Accept {
-			//logger.Infof("raft[%d]不接受leader[%d]的心跳请求!", server, rf.me)
 			return false
 		} else if !resp.LogIsAlignment {
-			//logger.Warnf("raft[%d]的日志与当前leader[%d]不匹配!", server, rf.me)
 			go rf.checkLogs(server, term)
+		} else {
+			peerIndex := rf.getPeerIndex(server)
+			if peerIndex >= 0 && int(rf.commitIndex) < peerIndex {
+				log := rf.logs[peerIndex]
+				if int(atomic.LoadInt32(&log.syncCount)) > (len(rf.peers) >> 1) {
+					go rf.sendCommitLog(log.index, -1)
+				}
+			}
 		}
-		//else if peerIndex >= 0 && int(rf.commitIndex) < peerIndex {
-		//	//peerIndex 大于当前的 commitIndex
-		//	log := rf.logs[peerIndex]
-		//	if int(atomic.LoadInt32(&log.syncCount)) > (len(rf.peers) / 2) {
-		//		//logger.Infof("日志[index=%d]已经同步到大多数节点", log.index)
-		//		go rf.sendCommitLog(log.index, -1)
-		//	}
-		//}
 	}
 
 	logger.Debugf("[heartbeat]  %d----->%d   [resp :%v]", rf.me, server, resp)
@@ -99,6 +70,11 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 }
 
 func (rf *Raft) sendCommitLog(commitIndex, server int) {
+
+	log := rf.logs[commitIndex]
+	if int32(log.term) != rf.term || int(atomic.LoadInt32(&log.syncCount)) <= (len(rf.peers)>>1) {
+		return
+	}
 
 	args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: int32(commitIndex), CommitLogTerm: rf.logs[commitIndex].term}
 
@@ -124,35 +100,49 @@ func (rf *Raft) sendCommitLog(commitIndex, server int) {
 }
 
 func (rf *Raft) checkLogs(server int, term int32) {
-	if atomic.CompareAndSwapInt32(&rf.peerInfos[server].syncLock, 0, 1) {
-		defer func() { rf.peerInfos[server].syncLock = 0 }()
+	if len(rf.peerInfos[server].channel) == 0 && rf.lockCheckLog(server) {
+		logger.Infof("leader[%d]开始检查[%d]", rf.me, server)
+		defer func() { rf.unlockCheckLog(server) }()
 
-		index := rf.getPeerIndex(server)
+		syncIndex := rf.getPeerIndex(server)
 		for true {
 
-			req := rf.createHeartbeatArgs(index, term)
+			req := rf.createHeartbeatArgs(syncIndex, term)
 			resp := RequestHeartbeatReply{}
 
-			ok := rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
+			ok := rf.peers[server].Call("Raft.CheckLogs", &req, &resp)
 
 			if ok {
+				if !resp.Accept {
+					//说明对方正在同步日志  下次再检查
+					return
+				}
 				if resp.LogIsAlignment {
 					break
 				}
 				if resp.LogLength > 0 {
-					index = resp.LogLength
+					syncIndex = resp.LogLength
 				}
 			}
-			index--
+			syncIndex--
 		}
+
 		length := len(rf.logs)
-		logger.Warnf("raft[%d]的日志与当前leader[%d log length=%d]日志最后相同的index=%d!", server, rf.me, length, index)
-		rf.setPeerIndex(server, index)
-		for i := index + 1; i < length; i++ {
-			if rf.sendLogEntry(server, rf.logs[i]) {
-				rf.setPeerIndex(server, i)
+		logger.Warnf("raft[%d]的日志与当前leader[%d log length=%d]日志最后相同的index=%d!", server, rf.me, length, syncIndex)
+		rf.setPeerIndex(server, syncIndex)
+
+		//Args: make([]*RequestSyncLogArgs, length-syncIndex-1)
+		req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
+		for i := syncIndex + 1; i < length; i++ {
+			entry := rf.logs[i]
+			args := RequestSyncLogArgs{Index: entry.index, Term: entry.term, Command: entry.command}
+			if entry.index != 0 {
+				args.PreLogTerm = rf.logs[entry.index-1].term
 			}
+			req.Args = append(req.Args, &args)
 		}
+		rf.sendCoalesceSyncLog(server, &req)
+
 	}
 }
 
@@ -176,43 +166,92 @@ func (rf *Raft) createHeartbeatArgs(logIndex int, term int32) RequestHeartbeatAr
 	}
 }
 
-func (rf *Raft) sendLogEntry(server int, entry *LogEntry) bool {
-	expIndex := rf.getPeerIndex(server) + 1
+func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 	index := entry.index
-
-	if expIndex < index {
-		return false
-	}
 
 	args := RequestSyncLogArgs{Index: index, Term: entry.term, Command: entry.command}
 	if index != 0 {
 		args.PreLogTerm = rf.logs[index-1].term
 	}
-	reply := RequestSyncLogReply{}
-	ok := rf.peers[server].Call("Raft.SyncLogEntry", &args, &reply)
-	logger.Infof("leader[%d]向raft[%d]节点发送日志,index=%d --->%v", rf.me, server, entry.index, reply.Accept)
 
-	if ok && reply.Accept {
-		go rf.sendLogSuccess(index, server)
-		return true
+	channel := rf.peerInfos[server].channel
+	if len(channel) < 19 {
+		//容量满了直接丢弃 依赖心跳检测维持一致性
+		channel <- args
 	}
-
-	return false
 }
 
 func (rf *Raft) sendLogSuccess(index, server int) {
 	log := rf.logs[index]
-	count := int(atomic.AddInt32(&rf.logs[index].syncCount, 1))
+	count := rf.syncCountAddGet(index)
 	rf.setPeerIndex(server, index)
 
-	mid := len(rf.peers)/2 + 1
+	mid := (len(rf.peers) >> 1) + 1
 
 	if count == mid {
 		//第一次同步到过半节点  向所有节点发送提交
 		go rf.sendCommitLog(log.index, -1)
 	} else if count > mid {
-		//logger.Infof("日志[index=%d]已经同步到大多数节点", log.index)
 		//后续的可以只发送给这个节点
 		go rf.sendCommitLog(log.index, server)
 	}
+}
+
+func (rf *Raft) sendCoalesceSyncLog(server int, req *CoalesceSyncLogArgs) {
+
+	//保证发送的第一个日志是对方期望的
+	expIndex := rf.getPeerIndex(server) + 1
+	if len(req.Args) == 0 || expIndex < req.Args[0].Index {
+		return
+	}
+
+	reply := CoalesceSyncLogReply{}
+	ok := rf.peers[server].Call("Raft.CoalesceSyncLog", req, &reply)
+
+	logger.Infof("leader[%d]向raft[%d]节点发送日志,起始index=%d 长度=%d --->对方接受[%v] 长度=%d",
+		rf.me, server, req.Args[0].Index, len(req.Args), ok, len(reply.Indexes))
+
+	if ok {
+		for _, data := range reply.Indexes {
+			rf.sendLogSuccess(*data, server)
+		}
+	}
+
+}
+
+func (rf *Raft) logEntryLoop() {
+
+	for !rf.killed() {
+		if rf.isLeader() {
+			for _, peer := range rf.peerInfos {
+				if peer.serverId != rf.me && rf.lockCheckLog(peer.serverId) {
+
+					go func(peer *peerInfo) {
+
+						server := peer.serverId
+						req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
+						for true {
+							end := false
+							select {
+							case syncLogArgs := <-peer.channel:
+								req.Args = append(req.Args, &syncLogArgs)
+							default:
+								end = true
+							}
+							if end {
+								break
+							}
+						}
+
+						rf.sendCoalesceSyncLog(server, &req)
+
+						rf.unlockCheckLog(peer.serverId)
+					}(peer)
+				}
+			}
+		}
+		//todo 高并发
+		time.Sleep(20 * time.Millisecond)
+	}
+
 }
