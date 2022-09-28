@@ -675,8 +675,8 @@ loop:
 			continue loop
 		}
 
-		fmt.Printf("%d %d %d %d %d \n", RequestVoteCount, HeartbeatCount, CommitLogCount, SyncLogEntryCount, (iters+1+3)*3)
 		if total2-total1 > (iters+1+3)*3 {
+			fmt.Printf("%d %d %d %d %d \n", RequestVoteCount, HeartbeatCount, CommitLogCount, SyncLogEntryCount, (iters+1+3)*3)
 			t.Fatalf("too many RPCs (%v) for %v entries\n", total2-total1, iters)
 		}
 

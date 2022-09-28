@@ -21,7 +21,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.term = term
 		//		if rf.accept(args.CommitIndex, args.CommitLogTerm) && (rf.setRole(follower, follower) || rf.setRole(leader, follower)) {
 		//&& !(atomic.CompareAndSwapInt32(&rf.role, follower, candidate) || atomic.CompareAndSwapInt32(&rf.role, leader, candidate))
-		if rf.accept(args.CommitIndex, args.CommitLogTerm) && !(atomic.CompareAndSwapInt32(&rf.role, follower, candidate) || atomic.CompareAndSwapInt32(&rf.role, leader, candidate)) {
+		if rf.accept(args.CommitIndex, args.CommitLogTerm) {
 			rf.lastCallTime = time.Now()
 			rf.role = follower
 			reply.Accept = true
@@ -84,7 +84,7 @@ func (rf *Raft) CheckLogs(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 		logTerm := args.LogTerm
 		reply.Accept = true
 
-		logger.Infof("我方[%d]日志与对方比较  我方长度:%d  对方index:%d", rf.me, len(rf.logs), logIndex)
+		//logger.Infof("我方[%d]日志与对方比较  我方长度:%d  对方index:%d", rf.me, len(rf.logs), logIndex)
 
 		if logIndex == -1 {
 			reply.LogIsAlignment = len(rf.logs) == 0
@@ -104,6 +104,7 @@ func (rf *Raft) CheckLogs(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 }
 
 func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
+	atomic.AddInt32(&rf.CommitLogCount, 1)
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -173,6 +174,7 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		}
 	}()
 
+	logger.Debugf("raft[%d]收到[%d]同步日志 %v", rf.me, req.Id, req.Args)
 	for _, args := range req.Args {
 		index := args.Index
 		preTerm := args.PreLogTerm

@@ -37,17 +37,6 @@ func (rf *Raft) lastTime() time.Time {
 	return rf.lastCallTime
 }
 
-func (rf *Raft) appendLog(entry *LogEntry) int {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	index := len(rf.logs)
-	entry.index = index
-	rf.logs = append(rf.logs, entry)
-
-	return index
-}
-
 func (rf *Raft) lockSyncLog() bool {
 	return atomic.CompareAndSwapInt32(&rf.syncLogLock, 0, 1)
 }
@@ -57,9 +46,7 @@ func (rf *Raft) unlockSyncLog() {
 }
 
 func (rf *Raft) lockCheckLog(server int) bool {
-	b := atomic.CompareAndSwapInt32(&rf.peerInfos[server].checkLogsLock, 0, 1)
-	//logger.Infof("raft[%d] 锁定了 %d   %v", rf.me, server, b)
-	return b
+	return atomic.CompareAndSwapInt32(&rf.peerInfos[server].checkLogsLock, 0, 1)
 }
 
 func (rf *Raft) unlockCheckLog(server int) {

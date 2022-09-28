@@ -74,6 +74,7 @@ type peerInfo struct {
 	checkLogsLock   int32 //0 未进行，1正在进行
 	updateIndexLock sync.Mutex
 	channel         chan RequestSyncLogArgs //日志同步缓存channel
+	commitChannel   chan CommitLogArgs      //日志提交缓存
 }
 
 //
@@ -178,15 +179,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	if isLeader {
 		entry := LogEntry{term: term, command: command, syncCount: 1}
-		index = rf.appendLog(&entry)
-
+		index = rf.addLogEntry(&entry)
 		logger.Infof("leader[%d]收到日志[index:%d,value:%v]添加请求", rf.me, index, commandToString(command))
-		for i := range rf.peers {
-			if i != rf.me {
-				rf.sendLogEntry(i, &entry)
-			}
-		}
-
 	}
 
 	return index + 1, term, isLeader
@@ -259,43 +253,73 @@ func (rf *Raft) heartbeatLoop() {
 	}
 }
 
-func (rf *Raft) messageLoop() {
-	for rf.killed() == false {
-		time.Sleep(300 * time.Millisecond)
-		rf.mu.Lock()
-		for i := rf.applyIndex + 1; i <= int(atomic.LoadInt32(&rf.commitIndex)); i++ {
-			item := rf.logs[i]
-			//if item.command == nil {
-			//	logger.Errorf("raft[%d]出现意想不到的情况:%+v   %v", rf.me, item, rf.logs)
-			//}
-			rf.applyCh <- ApplyMsg{CommandValid: true, Command: item.command, CommandIndex: item.index + 1}
-			logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.index+1)
-			rf.applyIndex++
+func (rf *Raft) logBufferLoop() {
+
+	for !rf.killed() {
+		if rf.isLeader() {
+			for _, peer := range rf.peerInfos {
+				if rf.lockCheckLog(peer.serverId) {
+					go func(peer *peerInfo) {
+						defer rf.unlockCheckLog(peer.serverId)
+
+						server := peer.serverId
+
+						if peer.serverId != rf.me {
+							req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
+							for true {
+								end := false
+								select {
+								case syncLogArgs, ok := <-peer.channel:
+									if ok {
+										req.Args = append(req.Args, &syncLogArgs)
+									} else {
+										end = true
+									}
+								default:
+									end = true
+								}
+								if end {
+									break
+								}
+							}
+
+							rf.sendCoalesceSyncLog(server, &req)
+						}
+
+						args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: -1, CommitLogTerm: -1}
+						for true {
+							end := false
+							select {
+							case commit, ok := <-peer.commitChannel:
+								if ok {
+									if commit.CommitIndex > args.CommitIndex {
+										args.CommitIndex = commit.CommitIndex
+										args.CommitLogTerm = commit.CommitLogTerm
+									}
+								} else {
+									end = true
+								}
+							default:
+								end = true
+							}
+							if end {
+								break
+							}
+						}
+
+						if args.CommitIndex != -1 {
+							go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
+						}
+
+					}(peer)
+				}
+			}
 		}
-		rf.mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
 	}
+
 }
 
-func (rf *Raft) flushLog(commitIndex int) {
-	for i := rf.applyIndex + 1; i <= commitIndex; i++ {
-		item := rf.logs[i]
-		rf.applyCh <- ApplyMsg{CommandValid: true, Command: item.command, CommandIndex: item.index + 1}
-		logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.index+1)
-		rf.applyIndex++
-	}
-}
-
-//
-// the service or tester wants to create a Raft server. the ports
-// of all the Raft servers (including this one) are in peers[]. this
-// server's port is peers[me]. all the servers' peers[] arrays
-// have the same order. persister is a place for this server to
-// save its persistent state, and also initially holds the most
-// recent saved state, if any. applyCh is a channel on which the
-// tester or service expects Raft to send ApplyMsg messages.
-// Make() must return quickly, so it should start goroutines
-// for any long-running work.
-//
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
@@ -316,8 +340,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// start ticker goroutine to start elections
 	go rf.ticker()
 	go rf.heartbeatLoop()
-	go rf.logEntryLoop()
-	//go rf.messageLoop()
+	go rf.logBufferLoop()
 
 	return rf
 }

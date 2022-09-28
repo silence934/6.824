@@ -2,7 +2,6 @@ package raft
 
 import (
 	"sync/atomic"
-	"time"
 )
 
 func (rf *Raft) sendRequestVote(server int) bool {
@@ -23,7 +22,12 @@ func (rf *Raft) sendRequestVote(server int) bool {
 				if len(rf.peerInfos) == 0 {
 					rf.peerInfos = make([]*peerInfo, len(rf.peers))
 					for i := 0; i < len(rf.peerInfos); i++ {
-						rf.peerInfos[i] = &peerInfo{serverId: i, index: len(rf.logs) - 1, checkLogsLock: 0, channel: make(chan RequestSyncLogArgs, 20)}
+						rf.peerInfos[i] = &peerInfo{
+							serverId: i, index: len(rf.logs) - 1,
+							checkLogsLock: 0,
+							channel:       make(chan RequestSyncLogArgs, 20),
+							commitChannel: make(chan CommitLogArgs, 20),
+						}
 					}
 				}
 				logger.Infof("raft[%d] 成为leader,term:%d", rf.me, rf.term)
@@ -58,7 +62,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 			if peerIndex >= 0 && int(rf.commitIndex) < peerIndex {
 				log := rf.logs[peerIndex]
 				if int(atomic.LoadInt32(&log.syncCount)) > (len(rf.peers) >> 1) {
-					go rf.sendCommitLog(log.index, -1)
+					go rf.sendCommitLogToBuffer(log.index, -1)
 				}
 			}
 		}
@@ -67,36 +71,6 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 	logger.Debugf("[heartbeat]  %d----->%d   [resp :%v]", rf.me, server, resp)
 
 	return ok
-}
-
-func (rf *Raft) sendCommitLog(commitIndex, server int) {
-
-	log := rf.logs[commitIndex]
-	if int32(log.term) != rf.term || int(atomic.LoadInt32(&log.syncCount)) <= (len(rf.peers)>>1) {
-		return
-	}
-
-	args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: int32(commitIndex), CommitLogTerm: rf.logs[commitIndex].term}
-
-	if server == -1 {
-		for i := range rf.peers {
-			reply := CommitLogReply{}
-			if i == rf.me {
-				go rf.CommitLog(&args, &reply)
-			} else {
-				atomic.AddInt32(&rf.CommitLogCount, 1)
-				go rf.peers[i].Call("Raft.CommitLog", &args, &reply)
-			}
-		}
-	} else {
-		reply := CommitLogReply{}
-		if server == rf.me {
-			go rf.CommitLog(&args, &reply)
-		} else {
-			atomic.AddInt32(&rf.CommitLogCount, 1)
-			go rf.peers[server].Call("Raft.CommitLog", &args, &reply)
-		}
-	}
 }
 
 func (rf *Raft) checkLogs(server int, term int32) {
@@ -166,7 +140,7 @@ func (rf *Raft) createHeartbeatArgs(logIndex int, term int32) RequestHeartbeatAr
 	}
 }
 
-func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
+func (rf *Raft) sendLogEntryToBuffer(server int, entry *LogEntry) {
 	index := entry.index
 
 	args := RequestSyncLogArgs{Index: index, Term: entry.term, Command: entry.command}
@@ -174,10 +148,33 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 		args.PreLogTerm = rf.logs[index-1].term
 	}
 
-	channel := rf.peerInfos[server].channel
-	if len(channel) < 19 {
+	select {
+	case rf.peerInfos[server].channel <- args:
+	default:
 		//容量满了直接丢弃 依赖心跳检测维持一致性
-		channel <- args
+	}
+}
+
+func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
+
+	log := rf.logs[commitIndex]
+	if int32(log.term) != rf.term || int(atomic.LoadInt32(&log.syncCount)) <= (len(rf.peers)>>1) {
+		return
+	}
+	args := CommitLogArgs{CommitIndex: int32(commitIndex), CommitLogTerm: rf.logs[commitIndex].term}
+
+	if server == -1 {
+		for _, peer := range rf.peerInfos {
+			select {
+			case peer.commitChannel <- args:
+			default:
+			}
+		}
+	} else {
+		select {
+		case rf.peerInfos[server].commitChannel <- args:
+		default:
+		}
 	}
 }
 
@@ -190,10 +187,10 @@ func (rf *Raft) sendLogSuccess(index, server int) {
 
 	if count == mid {
 		//第一次同步到过半节点  向所有节点发送提交
-		go rf.sendCommitLog(log.index, -1)
+		rf.sendCommitLogToBuffer(log.index, -1)
 	} else if count > mid {
 		//后续的可以只发送给这个节点
-		go rf.sendCommitLog(log.index, server)
+		rf.sendCommitLogToBuffer(log.index, server)
 	}
 }
 
@@ -215,43 +212,6 @@ func (rf *Raft) sendCoalesceSyncLog(server int, req *CoalesceSyncLogArgs) {
 		for _, data := range reply.Indexes {
 			rf.sendLogSuccess(*data, server)
 		}
-	}
-
-}
-
-func (rf *Raft) logEntryLoop() {
-
-	for !rf.killed() {
-		if rf.isLeader() {
-			for _, peer := range rf.peerInfos {
-				if peer.serverId != rf.me && rf.lockCheckLog(peer.serverId) {
-
-					go func(peer *peerInfo) {
-
-						server := peer.serverId
-						req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
-						for true {
-							end := false
-							select {
-							case syncLogArgs := <-peer.channel:
-								req.Args = append(req.Args, &syncLogArgs)
-							default:
-								end = true
-							}
-							if end {
-								break
-							}
-						}
-
-						rf.sendCoalesceSyncLog(server, &req)
-
-						rf.unlockCheckLog(peer.serverId)
-					}(peer)
-				}
-			}
-		}
-		//todo 高并发
-		time.Sleep(20 * time.Millisecond)
 	}
 
 }
