@@ -13,15 +13,23 @@ func commandToString(command interface{}) string {
 	return fmt.Sprintf("%6s", str)
 }
 
-func (rf *Raft) accept(commitIndex int32, term int) bool {
-	//return rf.term < term || rf.commitIndex <= commitIndex
-	if rf.commitIndex < commitIndex {
+func (rf *Raft) acceptVote(args *RequestVoteArgs) bool {
+	length := len(rf.logs)
+
+	if length == 0 {
 		return true
-	} else if rf.commitIndex > commitIndex {
+	}
+
+	lastLog := rf.logs[length-1]
+
+	if lastLog.term < args.LastLogTerm {
+		return true
+	} else if lastLog.term > args.LastLogTerm {
 		return false
 	} else {
-		return commitIndex == -1 || rf.logs[int(commitIndex)].term <= term
+		return args.LogsLength >= length
 	}
+
 }
 
 func (rf *Raft) addLogEntry(entry *LogEntry) int {

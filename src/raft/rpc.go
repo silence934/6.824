@@ -19,11 +19,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Accept = false
 	} else {
 		rf.term = term
+		rf.role = follower
 		//		if rf.accept(args.CommitIndex, args.CommitLogTerm) && (rf.setRole(follower, follower) || rf.setRole(leader, follower)) {
 		//&& !(atomic.CompareAndSwapInt32(&rf.role, follower, candidate) || atomic.CompareAndSwapInt32(&rf.role, leader, candidate))
-		if rf.accept(args.CommitIndex, args.CommitLogTerm) {
+		if rf.acceptVote(args) {
 			rf.lastCallTime = time.Now()
-			rf.role = follower
 			reply.Accept = true
 		} else {
 			reply.Accept = false
@@ -76,6 +76,8 @@ func (rf *Raft) CheckLogs(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 
 	// Your code here (2A, 2B).
 	if rf.term <= args.Term {
+		logger.Debugf("raft[%d %d]被[%d] check logs", rf.me, rf.term, args.Id)
+
 		rf.lastCallTime = time.Now()
 		rf.role = follower
 		rf.term = args.Term

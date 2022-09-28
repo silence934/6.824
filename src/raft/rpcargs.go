@@ -4,6 +4,7 @@ import "fmt"
 
 type RequestHeartbeatArgs struct {
 	// Your data here (2A, 2B).
+	Id   int
 	Term int32
 
 	CommitIndex   int32
@@ -42,10 +43,10 @@ type RequestSyncLogReply struct {
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
-	Id            int
-	Term          int32
-	CommitIndex   int32
-	CommitLogTerm int
+	Id          int
+	Term        int32
+	LogsLength  int
+	LastLogTerm int
 }
 
 //

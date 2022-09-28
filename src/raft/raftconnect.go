@@ -5,11 +5,19 @@ import (
 )
 
 func (rf *Raft) sendRequestVote(server int) bool {
-	commitLogTerm := -1
-	if int(rf.commitIndex) != -1 {
-		commitLogTerm = rf.logs[rf.commitIndex].term
+
+	length := len(rf.logs)
+	lastLogTerm := -1
+
+	if length > 0 {
+		lastLogTerm = rf.logs[len(rf.logs)-1].term
 	}
-	args := RequestVoteArgs{Term: rf.term, CommitIndex: rf.commitIndex, CommitLogTerm: commitLogTerm, Id: rf.me}
+	args := RequestVoteArgs{
+		Id:          rf.me,
+		Term:        rf.term,
+		LogsLength:  length,
+		LastLogTerm: lastLogTerm,
+	}
 
 	reply := RequestVoteReply{}
 	ok := rf.peers[server].Call("Raft.RequestVote", &args, &reply)
@@ -122,7 +130,7 @@ func (rf *Raft) checkLogs(server int, term int32) {
 
 func (rf *Raft) createHeartbeatArgs(logIndex int, term int32) RequestHeartbeatArgs {
 	if logIndex < 0 {
-		return RequestHeartbeatArgs{Term: term, LogTerm: -1, LogIndex: -1, CommitIndex: -1, CommitLogTerm: -1}
+		return RequestHeartbeatArgs{Id: rf.me, Term: term, LogTerm: -1, LogIndex: -1, CommitIndex: -1, CommitLogTerm: -1}
 	}
 	log := rf.logs[logIndex]
 
@@ -132,6 +140,7 @@ func (rf *Raft) createHeartbeatArgs(logIndex int, term int32) RequestHeartbeatAr
 		commitLogTerm = rf.logs[commitIndex].term
 	}
 	return RequestHeartbeatArgs{
+		Id:            rf.me,
 		Term:          rf.term,
 		LogTerm:       log.term,
 		LogIndex:      log.index,
