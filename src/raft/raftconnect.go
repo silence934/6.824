@@ -26,9 +26,7 @@ func (rf *Raft) sendRequestVote(server int) bool {
 	if reply.Accept {
 		v := atomic.AddInt32(&rf.vote, 1)
 		if int(v) > len(rf.peers)/2 {
-			for _, d := range rf.peerInfos {
-				d.index = length - 1
-			}
+			rf.initPeerInfos()
 			if rf.setRole(candidate, leader) {
 				logger.Infof("raft[%d] ==> leader,term:%d", rf.me, rf.term)
 			}

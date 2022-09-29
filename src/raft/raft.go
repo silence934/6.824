@@ -64,6 +64,7 @@ type peerInfo struct {
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
+	initPeers   int32
 	syncLogLock int32
 	mu          sync.Mutex          // Lock to protect shared access to this peer's state
 	peers       []*labrpc.ClientEnd // RPC end points of all peers
@@ -312,17 +313,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.role = follower
 	rf.commitIndex = -1
 	rf.logs = []*LogEntry{}
-
-	rf.peerInfos = make([]*peerInfo, len(rf.peers))
-	for i := 0; i < len(rf.peerInfos); i++ {
-		rf.peerInfos[i] = &peerInfo{
-			serverId:      i,
-			index:         len(rf.logs) - 1,
-			checkLogsLock: 0,
-			channel:       make(chan RequestSyncLogArgs, 20),
-			commitChannel: make(chan CommitLogArgs, 20),
-		}
-	}
 
 	rf.readPersist(persister.ReadRaftState())
 

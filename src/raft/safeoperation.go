@@ -57,3 +57,25 @@ func (rf *Raft) unlockCheckLog(server int) {
 func (rf *Raft) syncCountAddGet(index int) int {
 	return int(atomic.AddInt32(&rf.logs[index].syncCount, 1))
 }
+
+func (rf *Raft) initPeerInfos() {
+	if atomic.CompareAndSwapInt32(&rf.initPeers, 0, 1) {
+		defer func() { rf.initPeers = 0 }()
+		length := len(rf.logs)
+		if len(rf.peerInfos) == 0 {
+			rf.peerInfos = make([]*peerInfo, len(rf.peers))
+			for i := 0; i < len(rf.peerInfos); i++ {
+				rf.peerInfos[i] = &peerInfo{
+					serverId:      i,
+					index:         len(rf.logs) - 1,
+					checkLogsLock: 0,
+					channel:       make(chan RequestSyncLogArgs, 20),
+					commitChannel: make(chan CommitLogArgs, 20),
+				}
+			}
+		}
+		for _, d := range rf.peerInfos {
+			d.index = length - 1
+		}
+	}
+}
