@@ -76,7 +76,6 @@ func (rf *Raft) CheckLogs(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 
 	// Your code here (2A, 2B).
 	if rf.term <= args.Term {
-		logger.Debugf("raft[%d %d]被[%d] check logs", rf.me, rf.term, args.Id)
 
 		rf.lastCallTime = time.Now()
 		rf.role = follower
@@ -99,6 +98,7 @@ func (rf *Raft) CheckLogs(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 		} else {
 			reply.LogIsAlignment = false
 		}
+		logger.Debugf("raft[%d  term:%d]被raft[%d] check logs  -->%+v", rf.me, rf.term, args.Id, *reply)
 	} else {
 		reply.Accept = false
 	}

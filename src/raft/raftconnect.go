@@ -27,17 +27,6 @@ func (rf *Raft) sendRequestVote(server int) bool {
 		v := atomic.AddInt32(&rf.vote, 1)
 		if int(v) > len(rf.peers)/2 {
 			if rf.setRole(candidate, leader) {
-				if len(rf.peerInfos) == 0 {
-					rf.peerInfos = make([]*peerInfo, len(rf.peers))
-					for i := 0; i < len(rf.peerInfos); i++ {
-						rf.peerInfos[i] = &peerInfo{
-							serverId: i, index: len(rf.logs) - 1,
-							checkLogsLock: 0,
-							channel:       make(chan RequestSyncLogArgs, 20),
-							commitChannel: make(chan CommitLogArgs, 20),
-						}
-					}
-				}
 				logger.Infof("raft[%d] 成为leader,term:%d", rf.me, rf.term)
 			}
 		}
@@ -87,7 +76,7 @@ func (rf *Raft) checkLogs(server int, term int32) {
 		defer func() { rf.unlockCheckLog(server) }()
 
 		syncIndex := rf.getPeerIndex(server)
-		for true {
+		for syncIndex > -1 {
 
 			req := rf.createHeartbeatArgs(syncIndex, term)
 			resp := RequestHeartbeatReply{}

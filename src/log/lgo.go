@@ -33,13 +33,13 @@ func init() {
 	})
 
 	atomicLevel = zap.NewAtomicLevel()
-	atomicLevel.SetLevel(zapcore.InfoLevel)
+	atomicLevel.SetLevel(zapcore.ErrorLevel)
 	// 最后创建具体的Logger
 	core := zapcore.NewCore(encoder, zapcore.NewMultiWriteSyncer(zapcore.AddSync(os.Stdout)), atomicLevel)
 
-	log := zap.New(core, zap.AddCaller()) // 需要传入 zap.AddCaller() 才会显示打日志点的文件名和行数
-	errorLogger = log.Sugar()
+	log := zap.New(core, zap.AddCaller())
 
+	errorLogger = log.Sugar()
 }
 
 func SetLogLevel(level zapcore.Level) {

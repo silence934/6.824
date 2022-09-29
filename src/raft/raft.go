@@ -1,22 +1,5 @@
 package raft
 
-//
-// this is an outline of the API that raft must expose to
-// the service (or tester). see comments below for
-// each of these functions for more details.
-//
-// rf = Make(...)
-//   create a new Raft server.
-// rf.Start(command interface{}) (index, Term, isleader)
-//   start agreement on a new Log entry
-// rf.GetState() (Term, isLeader)
-//   ask a Raft for its current Term, and whether it thinks it is leader
-// ApplyMsg
-//   each time a new entry is committed to the Log, each Raft peer
-//   should send an ApplyMsg to the service (or tester)
-//   in the same server.
-//
-
 import (
 	"6.824/log"
 	"math/rand"
@@ -332,9 +315,18 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.role = follower
 	rf.commitIndex = -1
 	rf.logs = []*LogEntry{}
-	// Your initialization code here (2A, 2B, 2C).
 
-	// initialize from state persisted before a crash
+	rf.peerInfos = make([]*peerInfo, len(rf.peers))
+	for i := 0; i < len(rf.peerInfos); i++ {
+		rf.peerInfos[i] = &peerInfo{
+			serverId:      i,
+			index:         len(rf.logs) - 1,
+			checkLogsLock: 0,
+			channel:       make(chan RequestSyncLogArgs, 20),
+			commitChannel: make(chan CommitLogArgs, 20),
+		}
+	}
+
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
