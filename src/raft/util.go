@@ -53,7 +53,7 @@ func (rf *Raft) flushLog(commitIndex int) {
 	for i := rf.applyIndex + 1; i <= commitIndex; i++ {
 		item := rf.logs[i]
 		rf.applyCh <- ApplyMsg{CommandValid: true, Command: item.command, CommandIndex: item.index + 1}
-		logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.index+1)
+		//logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.index+1)
 		rf.applyIndex++
 	}
 }

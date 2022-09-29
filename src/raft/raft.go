@@ -68,13 +68,14 @@ type Raft struct {
 	mu          sync.Mutex          // Lock to protect shared access to this peer's state
 	peers       []*labrpc.ClientEnd // RPC end points of all peers
 	persister   *Persister          // Object to hold this peer's persisted state
-	me          int                 // this peer's index into peers[]
 	dead        int32               // set by Kill()
 
-	applyIndex   int
+	me         int // this peer's index into peers[]
+	applyIndex int //刷入applyCh的下标
+	role       int32
+
 	applyCh      chan ApplyMsg
 	peerInfos    []*peerInfo
-	role         int32
 	lastCallTime time.Time
 	vote         int32 //得票数
 	term         int32
@@ -103,14 +104,12 @@ func (rf *Raft) GetState() (int, bool) {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	//w := new(bytes.Buffer)
+	//e := labgob.NewEncoder(w)
+	//e.Encode(rf.xxx)
+	//e.Encode(rf.yyy)
+	//data := w.Bytes()
+	//rf.persister.SaveRaftState(data)
 }
 
 //
@@ -122,17 +121,16 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 	// Your code here (2C).
 	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	//r := bytes.NewBuffer(data)
+	//d := labgob.NewDecoder(r)
+	//var xxx
+	//var yyy
+	//if d.Decode(&xxx) != nil || d.Decode(&yyy) != nil {
+	//
+	//} else {
+	//  rf.xxx = xxx
+	//  rf.yyy = yyy
+	//}
 }
 
 //
@@ -163,7 +161,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	if isLeader {
 		entry := LogEntry{term: term, command: command, syncCount: 1}
 		index = rf.addLogEntry(&entry)
-		logger.Infof("leader[%d]收到日志[index:%d,value:%v]添加请求", rf.me, index, commandToString(command))
+		logger.Infof("[append log] -----> leader[%d] [index:%d,value:%v]", rf.me, index, commandToString(command))
 	}
 
 	return index + 1, term, isLeader
@@ -265,7 +263,6 @@ func (rf *Raft) logBufferLoop() {
 									break
 								}
 							}
-
 							rf.sendCoalesceSyncLog(server, &req)
 						}
 

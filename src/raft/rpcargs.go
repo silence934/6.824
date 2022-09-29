@@ -4,20 +4,16 @@ import "fmt"
 
 type RequestHeartbeatArgs struct {
 	// Your data here (2A, 2B).
-	Id   int
-	Term int32
-
-	CommitIndex   int32
-	LogTerm       int
-	LogIndex      int
-	CommitLogTerm int
+	Id    int
+	Term  int32
+	Index int
 }
 
 type RequestHeartbeatReply struct {
-	Accept         bool
-	LogIsAlignment bool
-	LogLength      int
-	// Your data here (2A).
+	Accept bool
+
+	LogIndex int
+	LogTerm  int
 }
 
 type RequestSyncLogArgs struct {

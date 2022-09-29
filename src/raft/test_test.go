@@ -491,6 +491,7 @@ func TestRejoin2B(t *testing.T) {
 	cfg.one(104, 2, true)
 
 	// all together now
+	logger.Debugf("leader2 connect")
 	cfg.connect(leader2)
 
 	cfg.one(105, servers, true)

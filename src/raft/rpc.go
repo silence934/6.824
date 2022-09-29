@@ -31,79 +31,71 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	//logger.Infof("raft[%d  %d]收到投票请求对方[%d]的term:%d 结果=%v,CommitIndex:%d,我的term:%d CommitIndex:%d", rf.me, rf.role, args.Id, args.Term, reply.Accept, args.CommitIndex, rf.term, rf.commitIndex)
-	logger.Infof("raft[%d %d]收到投票请求[%d]  结果=%v", rf.me, role, args.Id, reply.Accept)
+	logger.Debugf("raft[%d %d]收到投票请求[%d]  结果=%v", rf.me, role, args.Id, reply.Accept)
 
 }
 
 func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatReply) {
 	atomic.AddInt32(&rf.HeartbeatCount, 1)
-
-	// Your code here (2A, 2B).
 	if rf.term <= args.Term {
 		rf.lastCallTime = time.Now()
 		rf.role = follower
 		rf.term = args.Term
 
-		logIndex := args.LogIndex
-		logTerm := args.LogTerm
 		reply.Accept = true
 
-		if logIndex == -1 {
-			reply.LogIsAlignment = len(rf.logs) == 0
-		} else if logIndex >= len(rf.logs) {
-			reply.LogIsAlignment = false
-			reply.LogLength = len(rf.logs)
-		} else if rf.logs[logIndex].term == logTerm {
-			reply.LogIsAlignment = true
-			rf.commitIndex = args.CommitIndex
+		length := len(rf.logs)
+		index := args.Index
+		if index == -1 {
+			reply.LogIndex = -1
+			reply.LogTerm = -1
+		} else if index >= length {
+			reply.LogIndex = length - 1
+			reply.LogTerm = rf.logs[length-1].term
 		} else {
-			reply.LogIsAlignment = false
+			reply.LogIndex = index
+			reply.LogTerm = rf.logs[index].term
 		}
+
 	} else {
 		reply.Accept = false
 	}
 
 }
 
-func (rf *Raft) CheckLogs(args *RequestHeartbeatArgs, reply *RequestHeartbeatReply) {
-	atomic.AddInt32(&rf.HeartbeatCount, 1)
-
-	if !rf.isFollower() && !rf.lockSyncLog() {
-		reply.Accept = false
-		return
-	}
-	defer rf.unlockSyncLog()
-
-	// Your code here (2A, 2B).
-	if rf.term <= args.Term {
-
-		rf.lastCallTime = time.Now()
-		rf.role = follower
-		rf.term = args.Term
-
-		logIndex := args.LogIndex
-		logTerm := args.LogTerm
-		reply.Accept = true
-
-		//logger.Infof("我方[%d]日志与对方比较  我方长度:%d  对方index:%d", rf.me, len(rf.logs), logIndex)
-
-		if logIndex == -1 {
-			reply.LogIsAlignment = len(rf.logs) == 0
-		} else if logIndex >= len(rf.logs) {
-			reply.LogIsAlignment = false
-			reply.LogLength = len(rf.logs)
-		} else if rf.logs[logIndex].term == logTerm {
-			reply.LogIsAlignment = true
-			rf.commitIndex = args.CommitIndex
-		} else {
-			reply.LogIsAlignment = false
-		}
-		logger.Debugf("raft[%d  term:%d]被raft[%d] check logs  -->%+v", rf.me, rf.term, args.Id, *reply)
-	} else {
-		reply.Accept = false
-	}
-
-}
+//func (rf *Raft) CheckLogs(args *RequestHeartbeatArgs, reply *RequestHeartbeatReply) {
+//	atomic.AddInt32(&rf.HeartbeatCount, 1)
+//
+//	// Your code here (2A, 2B).
+//	if rf.isFollower() && rf.term <= args.Term {
+//
+//		rf.lastCallTime = time.Now()
+//		rf.role = follower
+//		rf.term = args.Term
+//
+//		logIndex := args.LogIndex
+//		logTerm := args.LogTerm
+//		reply.Accept = true
+//
+//		//logger.Infof("我方[%d]日志与对方比较  我方长度:%d  对方index:%d", rf.me, len(rf.logs), logIndex)
+//
+//		if logIndex == -1 {
+//			reply.LogIsAlignment = len(rf.logs) == 0
+//		} else if logIndex >= len(rf.logs) {
+//			reply.LogIsAlignment = false
+//			reply.LogLength = len(rf.logs)
+//		} else if rf.logs[logIndex].term == logTerm {
+//			reply.LogIsAlignment = true
+//			rf.commitIndex = args.CommitIndex
+//		} else {
+//			reply.LogIsAlignment = false
+//		}
+//		//logger.Debugf("raft[%d  term:%d]被raft[%d] check logs  -->%+v", rf.me, rf.term, args.Id, *reply)
+//	} else {
+//		reply.Accept = false
+//	}
+//
+//}
 
 func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 	atomic.AddInt32(&rf.CommitLogCount, 1)
@@ -125,50 +117,18 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 	rf.lastCallTime = time.Now()
 
 	rf.commitIndex = commitIndex
-	logger.Infof("raft[%d]提交了日志,当前commitIndex=%d", rf.me, commitIndex)
+	logger.Infof("[commit log] %d  index=%d ----->", rf.me, commitIndex)
 	rf.flushLog(int(commitIndex))
 	reply.Accept = true
-}
-
-func (rf *Raft) SyncLogEntry(args *RequestSyncLogArgs, reply *RequestSyncLogReply) {
-	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
-
-	if !rf.isFollower() || !rf.lockSyncLog() {
-		reply.Accept = false
-		return
-	}
-	defer rf.unlockSyncLog()
-
-	rf.lastCallTime = time.Now()
-
-	length := len(rf.logs)
-	index := args.Index
-	preTerm := args.PreLogTerm
-	reply.Accept = true
-	if length < index || (index != 0 && rf.logs[index-1].term != preTerm) {
-		reply.Accept = false
-	} else if length == index {
-		rf.logs = append(rf.logs, &LogEntry{index: index, command: args.Command, term: args.Term})
-		//rf.applyCh <- ApplyMsg{CommandValid: true, Command: args.Command, CommandIndex: index + 1}
-	} else {
-		rf.logs[index] = &LogEntry{index: index, command: args.Command, term: args.Term}
-	}
-
 }
 
 func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLogReply) {
 	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
 
-	//logger.Infof("raft[%d]收到[%d]日志添加请求 leng=%d", rf.me, req.Id, len(req.Args))
-
 	reply.Indexes = []*int{}
-	if !rf.isFollower() || req.Term < rf.term || !rf.lockSyncLog() {
+	if !rf.isFollower() || req.Term < rf.term {
 		return
 	}
-	defer rf.unlockSyncLog()
-
-	rf.lastCallTime = time.Now()
-
 	defer func() {
 		if err := recover(); err != nil {
 			logger.Errorf("出现错误:  原logs 长度=%d,\n接收到的数据:%v", len(rf.logs), req.Args)
@@ -176,7 +136,9 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		}
 	}()
 
-	logger.Debugf("raft[%d]收到[%d]同步日志 %v", rf.me, req.Id, req.Args)
+	rf.lastCallTime = time.Now()
+
+	//logger.Debugf("raft[%d]收到[%d]同步日志 %v", rf.me, req.Id, req.Args)
 	for _, args := range req.Args {
 		index := args.Index
 		preTerm := args.PreLogTerm
