@@ -16,7 +16,7 @@ trap finish EXIT
 
 for((i=1;;i++));
 do
-  result=$(go test -run 2B)
+  result=$(go test -run 2C)
   strB="FAIL"
 
   if [[ $result =~ $strB ]]

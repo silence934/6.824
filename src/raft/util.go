@@ -22,9 +22,9 @@ func (rf *Raft) acceptVote(args *RequestVoteArgs) bool {
 
 	lastLog := rf.logs[length-1]
 
-	if lastLog.term < args.LastLogTerm {
+	if lastLog.Term < args.LastLogTerm {
 		return true
-	} else if lastLog.term > args.LastLogTerm {
+	} else if lastLog.Term > args.LastLogTerm {
 		return false
 	} else {
 		return args.LogsLength >= length
@@ -33,12 +33,12 @@ func (rf *Raft) acceptVote(args *RequestVoteArgs) bool {
 }
 
 func (rf *Raft) addLogEntry(entry *LogEntry) int {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.appendLogLock.Lock()
+	defer rf.appendLogLock.Unlock()
 
 	index := len(rf.logs)
-	entry.index = index
-	rf.logs = append(rf.logs, entry)
+	entry.Index = index
+	rf.appendLog(entry)
 
 	for i := range rf.peers {
 		if i != rf.me {
@@ -52,8 +52,8 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 func (rf *Raft) flushLog(commitIndex int) {
 	for i := rf.applyIndex + 1; i <= commitIndex; i++ {
 		item := rf.logs[i]
-		rf.applyCh <- ApplyMsg{CommandValid: true, Command: item.command, CommandIndex: item.index + 1}
-		//logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.index+1)
+		rf.applyCh <- ApplyMsg{CommandValid: true, Command: item.Command, CommandIndex: item.Index + 1}
+		//logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.Index+1)
 		rf.applyIndex++
 	}
 }

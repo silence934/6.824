@@ -12,8 +12,9 @@ type RequestHeartbeatArgs struct {
 type RequestHeartbeatReply struct {
 	Accept bool
 
-	LogIndex int
-	LogTerm  int
+	FirstIndex int
+	LogIndex   int
+	LogTerm    int
 }
 
 type RequestSyncLogArgs struct {
@@ -52,6 +53,7 @@ type RequestVoteArgs struct {
 type RequestVoteReply struct {
 	// Your data here (2A).
 	Accept bool
+	Term   int32
 }
 
 type CommitLogArgs struct {

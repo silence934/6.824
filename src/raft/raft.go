@@ -1,7 +1,10 @@
 package raft
 
 import (
+	"6.824/labgob"
 	"6.824/log"
+	"bytes"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -45,10 +48,15 @@ type ApplyMsg struct {
 }
 
 type LogEntry struct {
-	index     int
-	term      int
-	command   interface{}
-	syncCount int32
+	Index     int
+	Term      int
+	Command   interface{}
+	SyncCount int32
+	//Complete  []bool
+}
+
+func (t *LogEntry) String() string {
+	return fmt.Sprintf("{%d %v}", t.Index, t.Command)
 }
 
 type peerInfo struct {
@@ -64,14 +72,16 @@ type peerInfo struct {
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	initPeers   int32
-	syncLogLock int32
-	mu          sync.Mutex          // Lock to protect shared access to this peer's state
-	peers       []*labrpc.ClientEnd // RPC end points of all peers
-	persister   *Persister          // Object to hold this peer's persisted state
-	dead        int32               // set by Kill()
+	mu            sync.Mutex
+	initPeers     int32
+	syncLogLock   int32
+	voteLock      sync.Mutex
+	appendLogLock sync.Mutex
+	peers         []*labrpc.ClientEnd // RPC end points of all peers
+	persister     *Persister          // Object to hold this peer's persisted state
+	dead          int32               // set by Kill()
 
-	me         int // this peer's index into peers[]
+	me         int // this peer's Index into peers[]
 	applyIndex int //刷入applyCh的下标
 	role       int32
 
@@ -105,12 +115,12 @@ func (rf *Raft) GetState() (int, bool) {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
-	//w := new(bytes.Buffer)
-	//e := labgob.NewEncoder(w)
-	//e.Encode(rf.xxx)
-	//e.Encode(rf.yyy)
-	//data := w.Bytes()
-	//rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.term)
+	e.Encode(rf.logs)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
@@ -122,16 +132,16 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 	// Your code here (2C).
 	// Example:
-	//r := bytes.NewBuffer(data)
-	//d := labgob.NewDecoder(r)
-	//var xxx
-	//var yyy
-	//if d.Decode(&xxx) != nil || d.Decode(&yyy) != nil {
-	//
-	//} else {
-	//  rf.xxx = xxx
-	//  rf.yyy = yyy
-	//}
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var term int32
+	var logs []*LogEntry
+	if d.Decode(&term) != nil || d.Decode(&logs) != nil {
+		logger.Error("decode error")
+	} else {
+		rf.term = term
+		rf.logs = logs
+	}
 }
 
 //
@@ -146,9 +156,9 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 }
 
 // the service says it has created a snapshot that has
-// all info up to and including index. this means the
+// all info up to and including Index. this means the
 // service no longer needs the Log through (and including)
-// that index. Raft should now trim its Log as much as possible.
+// that Index. Raft should now trim its Log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
 
@@ -156,13 +166,16 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
+	//term 和isLeader不可交换顺序
 	term := int(rf.term)
 	isLeader := rf.isLeader()
 
 	if isLeader {
-		entry := LogEntry{term: term, command: command, syncCount: 1}
+		//complete := make([]bool, len(rf.peers))
+		//complete[rf.me] = true
+		entry := LogEntry{Term: term, Command: command, SyncCount: 1}
 		index = rf.addLogEntry(&entry)
-		logger.Infof("[append log] -----> leader[%d] [index:%d,value:%v]", rf.me, index, commandToString(command))
+		logger.Infof("[append log] -----> leader[%d] [Index:%d,value:%v]", rf.me, index, commandToString(command))
 	}
 
 	return index + 1, term, isLeader
@@ -193,7 +206,7 @@ func (rf *Raft) killed() bool {
 // heartsbeats recently.
 func (rf *Raft) ticker() {
 	for rf.killed() == false {
-		ms := 150 + (rand.Int63() % 150)
+		ms := 450 + (rand.Int63() % 150)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		//logger.Debugf("raft[%d-%d] ms call time:%v", rf.me, rf.role, rf.lastCallTime)
@@ -207,7 +220,7 @@ func (rf *Raft) ticker() {
 			}
 
 			rf.vote = 1
-			rf.term++
+			rf.setTerm(rf.term + 1)
 
 			for i := range rf.peers {
 				if i != rf.me {
@@ -240,43 +253,18 @@ func (rf *Raft) logBufferLoop() {
 	for !rf.killed() {
 		if rf.isLeader() {
 			for _, peer := range rf.peerInfos {
-				if rf.lockCheckLog(peer.serverId) {
-					go func(peer *peerInfo) {
-						defer rf.unlockCheckLog(peer.serverId)
 
-						server := peer.serverId
+				go func(peer *peerInfo) {
+					server := peer.serverId
 
-						if peer.serverId != rf.me {
-							req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
-							for true {
-								end := false
-								select {
-								case syncLogArgs, ok := <-peer.channel:
-									if ok {
-										req.Args = append(req.Args, &syncLogArgs)
-									} else {
-										end = true
-									}
-								default:
-									end = true
-								}
-								if end {
-									break
-								}
-							}
-							rf.sendCoalesceSyncLog(server, &req)
-						}
-
-						args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: -1, CommitLogTerm: -1}
+					if peer.serverId != rf.me {
+						req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
 						for true {
 							end := false
 							select {
-							case commit, ok := <-peer.commitChannel:
+							case syncLogArgs, ok := <-peer.channel:
 								if ok {
-									if commit.CommitIndex > args.CommitIndex {
-										args.CommitIndex = commit.CommitIndex
-										args.CommitLogTerm = commit.CommitLogTerm
-									}
+									req.Args = append(req.Args, &syncLogArgs)
 								} else {
 									end = true
 								}
@@ -287,16 +275,42 @@ func (rf *Raft) logBufferLoop() {
 								break
 							}
 						}
-
-						if args.CommitIndex != -1 {
-							go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
+						lock := rf.lockCheckLog(peer.serverId, 100*time.Millisecond)
+						if lock.Lock() {
+							rf.sendCoalesceSyncLog(server, &req)
+							lock.Unlock()
 						}
+					}
 
-					}(peer)
-				}
+					args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: -1, CommitLogTerm: -1}
+
+					for true {
+						end := false
+						select {
+						case commit, ok := <-peer.commitChannel:
+							if ok {
+								if commit.CommitIndex > args.CommitIndex {
+									args.CommitIndex = commit.CommitIndex
+									args.CommitLogTerm = commit.CommitLogTerm
+								}
+							} else {
+								end = true
+							}
+						default:
+							end = true
+						}
+						if end {
+							break
+						}
+					}
+
+					if args.CommitIndex != -1 {
+						go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
+					}
+				}(peer)
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(21 * time.Millisecond)
 	}
 
 }
