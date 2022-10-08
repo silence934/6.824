@@ -2,7 +2,6 @@ package raft
 
 import (
 	"6.824/labgob"
-	"6.824/log"
 	"bytes"
 	"fmt"
 	"math/rand"
@@ -15,8 +14,6 @@ import (
 	//	"6.824/labgob"
 	"6.824/labrpc"
 )
-
-var logger = log.Logger()
 
 const (
 	follower = iota
@@ -80,6 +77,7 @@ type Raft struct {
 	peers         []*labrpc.ClientEnd // RPC end points of all peers
 	persister     *Persister          // Object to hold this peer's persisted state
 	dead          int32               // set by Kill()
+	logger        Log
 
 	me         int // this peer's Index into peers[]
 	applyIndex int //刷入applyCh的下标
@@ -137,7 +135,7 @@ func (rf *Raft) readPersist(data []byte) {
 	var term int32
 	var logs []*LogEntry
 	if d.Decode(&term) != nil || d.Decode(&logs) != nil {
-		logger.Error("decode error")
+		rf.logger.Errorf("decode error")
 	} else {
 		rf.term = term
 		rf.logs = logs
@@ -175,7 +173,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		//complete[rf.me] = true
 		entry := LogEntry{Term: term, Command: command, SyncCount: 1}
 		index = rf.addLogEntry(&entry)
-		logger.Infof("[append log] -----> leader[%d] [Index:%d,value:%v]", rf.me, index, commandToString(command))
+		rf.logger.Printf(dClient, fmt.Sprintf("al [Index:%d,value:%v]", index, commandToString(command)))
 	}
 
 	return index + 1, term, isLeader
@@ -257,31 +255,6 @@ func (rf *Raft) logBufferLoop() {
 				go func(peer *peerInfo) {
 					server := peer.serverId
 
-					if peer.serverId != rf.me {
-						req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
-						for true {
-							end := false
-							select {
-							case syncLogArgs, ok := <-peer.channel:
-								if ok {
-									req.Args = append(req.Args, &syncLogArgs)
-								} else {
-									end = true
-								}
-							default:
-								end = true
-							}
-							if end {
-								break
-							}
-						}
-						lock := rf.lockCheckLog(peer.serverId, 100*time.Millisecond)
-						if lock.Lock() {
-							rf.sendCoalesceSyncLog(server, &req)
-							lock.Unlock()
-						}
-					}
-
 					args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: -1, CommitLogTerm: -1}
 
 					for true {
@@ -334,6 +307,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.ticker()
 	go rf.heartbeatLoop()
 	go rf.logBufferLoop()
+
+	//PrettyDebug(dTimer, "S%d, apply log, log index=%v, log term=%v, log command=%v", rf.me, 1, 2, 3)
+	//PrettyDebug(dInfo, "S%d, apply log, log index=%v, log term=%v, log command=%v", rf.me, 1, 2, 3)
+	//PrettyDebug(dTrace, "S%d, apply log, log index=%v, log term=%v, log command=%v", rf.me, 1, 2, 3)
+
+	//logger.Infof("S%d, apply log, log index=%v, log term=%v, log command=%v", rf.me, 1, 2, 3)
+
+	rf.logger = MakeLog(rf)
 
 	return rf
 }

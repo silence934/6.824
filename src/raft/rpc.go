@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 )
@@ -99,7 +100,8 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 	rf.lastCallTime = time.Now()
 
 	rf.commitIndex = commitIndex
-	logger.Infof("[commit log] %d  Index=%d ----->", rf.me, commitIndex)
+	rf.logger.Printf(dCommit, fmt.Sprintf("commit index=%d", commitIndex))
+
 	rf.flushLog(int(commitIndex))
 	reply.Accept = true
 }
@@ -109,38 +111,70 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 
 	reply.Indexes = []*int{}
 	if !rf.isFollower() || req.Term < rf.term || !rf.lockSyncLog() {
-		logger.Infof("%d %d %d", rf.role, rf.term, req.Term)
+		rf.logger.Printf(dLog, fmt.Sprintf("syncLog failed:%d %d %d", rf.role, rf.term, req.Term))
 		return
 	}
 
 	defer func() {
 		rf.unlockSyncLog()
 		if err := recover(); err != nil {
-			logger.Errorf("出现错误:  原logs 长度=%d,\n接收到的数据:%v", len(rf.logs), req.Args)
+			rf.logger.Errorf("出现错误:  原logs 长度=%d,\n接收到的数据:%v", len(rf.logs), req.Args)
 			panic(err)
 		}
 	}()
 
 	rf.lastCallTime = time.Now()
 
+	var lastIndex = 0
 	for _, args := range req.Args {
 		index := args.Index
 		preTerm := args.PreLogTerm
+		lastIndex = index
 
 		if len(rf.logs) < index || (index != 0 && rf.logs[index-1].Term != preTerm) {
 			//要追加的日志下标在之前的最后一个日志还要后边：不合法的
 			//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
 			return
 		} else if len(rf.logs) == index {
-			//complete := make([]bool, len(rf.peers))
-			//complete[rf.me] = true
 			rf.appendLog(&LogEntry{Index: index, Command: args.Command, Term: args.Term})
 		} else {
-			//complete := make([]bool, len(rf.peers))
-			//complete[rf.me] = true
 			rf.setLog(&LogEntry{Index: index, Command: args.Command, Term: args.Term}, index)
 		}
 		reply.Indexes = append(reply.Indexes, &index)
 	}
 
+	if len(rf.logs) > lastIndex+1 && rf.logs[lastIndex].Term > rf.logs[lastIndex+1].Term {
+		rf.logs = rf.logs[:lastIndex+1]
+	}
+
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <--%d   receive=%d",
+		req.Args[0].Index, len(req.Args), req.Id, len(reply.Indexes)))
+}
+
+func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
+	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
+	reply.Accept = false
+
+	if !rf.isFollower() || req.Term < int(rf.term) {
+		rf.logger.Printf(dError, fmt.Sprintf("appendLog failed:%d %d %d", rf.role, rf.term, req.Term))
+		return
+	}
+
+	index := req.Index
+	preTerm := req.PreLogTerm
+
+	if len(rf.logs) < index || (index != 0 && rf.logs[index-1].Term != preTerm) {
+		//要追加的日志下标在之前的最后一个日志还要后边：不合法的
+		//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
+		return
+	} else if len(rf.logs) == index {
+		rf.appendLog(&LogEntry{Index: index, Command: req.Command, Term: req.Term})
+		reply.Accept = true
+	} else {
+		rf.setLog(&LogEntry{Index: index, Command: req.Command, Term: req.Term}, index)
+		reply.Accept = true
+	}
+
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=1 <--",
+		req.Index))
 }

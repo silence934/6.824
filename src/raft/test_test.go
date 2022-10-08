@@ -491,7 +491,6 @@ func TestRejoin2B(t *testing.T) {
 	cfg.one(104, 2, true)
 
 	// all together now
-	logger.Debugf("leader2 connect")
 	cfg.connect(leader2)
 
 	cfg.one(105, servers, true)
@@ -678,7 +677,7 @@ loop:
 		}
 
 		if total2-total1 > (iters+1+3)*3 {
-			fmt.Printf("%d %d %d %d %d \n", RequestVoteCount, HeartbeatCount, CommitLogCount, SyncLogEntryCount, (iters+1+3)*3)
+			//fmt.Printf("%d %d %d %d %d \n", RequestVoteCount, HeartbeatCount, CommitLogCount, SyncLogEntryCount, (iters+1+3)*3)
 			t.Fatalf("too many RPCs (%v) for %v entries\n", total2-total1, iters)
 		}
 

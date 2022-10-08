@@ -42,7 +42,7 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 
 	for i := range rf.peers {
 		if i != rf.me {
-			rf.sendLogEntryToBuffer(i, entry)
+			go rf.sendLogEntryToBuffer(i, entry)
 		}
 	}
 
@@ -57,3 +57,27 @@ func (rf *Raft) flushLog(commitIndex int) {
 		rf.applyIndex++
 	}
 }
+
+//func (rf *Raft) binarySearch(start, end int) int {
+//
+//	n := len(rf.peers)
+//	mid := (start + end) >> 1
+//	med := mid + 1
+//
+//	return 1
+//}
+//
+//func (rf *Raft) test(n, index int) bool {
+//	count := 1
+//
+//	for _, d := range rf.peerInfos {
+//		if d.index >= index {
+//			count++
+//			if count >= n {
+//				return true
+//			}
+//		}
+//	}
+//
+//	return false
+//}

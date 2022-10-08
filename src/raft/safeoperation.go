@@ -15,18 +15,17 @@ func (rf *Raft) getPeerIndex(server int) int {
 	return index
 }
 
-//
-//func (rf *Raft) updatePeerIndex(server, older, new int) bool {
-//	rf.peerInfos[server].updateIndexLock.Lock()
-//	defer rf.peerInfos[server].updateIndexLock.Unlock()
-//	peer := rf.peerInfos[server]
-//	if peer.index == older {
-//		peer.index = new
-//		//logger.Infof("raft[%d] 修改 peer[%d].index  %d->%d  %d", rf.me, server, older, new, rf.peerInfos[server].index)
-//		return true
-//	}
-//	return false
-//}
+func (rf *Raft) updatePeerIndex(server, older, new int) bool {
+	rf.peerInfos[server].updateIndexLock.Lock()
+	defer rf.peerInfos[server].updateIndexLock.Unlock()
+	peer := rf.peerInfos[server]
+	if peer.index == older {
+		peer.index = new
+		//logger.Infof("raft[%d] 修改 peer[%d].index  %d->%d  %d", rf.me, server, older, new, rf.peerInfos[server].index)
+		return true
+	}
+	return false
+}
 
 func (rf *Raft) setPeerIndex(server, index int) {
 	rf.peerInfos[server].updateIndexLock.Lock()
