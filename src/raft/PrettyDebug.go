@@ -92,7 +92,7 @@ func (l *Log) Printf(topic LogTopic, template string) {
 	PrettyDebug(topic, template)
 }
 
-func MakeLog(raft *Raft) Log {
+func MakeLogger(raft *Raft) Log {
 	r := Log{raft: raft}
 	return r
 }

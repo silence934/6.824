@@ -60,7 +60,7 @@ type CommitLogArgs struct {
 	// Your data here (2A, 2B).Ω
 	Id            int
 	Term          int32
-	CommitIndex   int32
+	CommitIndex   int
 	CommitLogTerm int
 }
 
@@ -77,4 +77,16 @@ type CoalesceSyncLogArgs struct {
 
 type CoalesceSyncLogReply struct {
 	Indexes []*int
+}
+
+type InstallSnapshotArgs struct {
+	Id                int
+	Term              int32
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+type InstallSnapshotReply struct {
+	Accept bool
 }

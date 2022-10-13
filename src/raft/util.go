@@ -14,13 +14,13 @@ func commandToString(command interface{}) string {
 }
 
 func (rf *Raft) acceptVote(args *RequestVoteArgs) bool {
-	length := len(rf.logs)
+	length := rf.logLength()
 
 	if length == 0 {
 		return true
 	}
 
-	lastLog := rf.logs[length-1]
+	lastLog := rf.entry(rf.logLength() - 1)
 
 	if lastLog.Term < args.LastLogTerm {
 		return true
@@ -36,7 +36,8 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 	rf.appendLogLock.Lock()
 	defer rf.appendLogLock.Unlock()
 
-	index := len(rf.logs)
+	//fmt.Printf("%d %d\n", len(rf.logs), rf.lastIncludedIndex)
+	index := rf.logLength()
 	entry.Index = index
 	rf.appendLog(entry)
 
@@ -51,9 +52,14 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 
 func (rf *Raft) flushLog(commitIndex int) {
 	for i := rf.applyIndex + 1; i <= commitIndex; i++ {
-		item := rf.logs[i]
-		rf.applyCh <- ApplyMsg{CommandValid: true, Command: item.Command, CommandIndex: item.Index + 1}
-		//logger.Debugf("raft[%d]向applyCh输入数据 CommandIndex=%d", rf.me, item.Index+1)
+		item := rf.entry(i)
+		rf.applyCh <- ApplyMsg{
+			CommandValid:  true,
+			Command:       item.Command,
+			CommandIndex:  item.Index,
+			SnapshotValid: false,
+		}
+		//fmt.Printf("raft[%d]向applyCh输入数据 %+v\n", rf.me, item)
 		rf.applyIndex++
 	}
 }
@@ -81,3 +87,30 @@ func (rf *Raft) flushLog(commitIndex int) {
 //
 //	return false
 //}
+
+func (rf *Raft) entry(index int) *LogEntry {
+	return &rf.logs[rf.logIndex(index)]
+}
+
+func (rf *Raft) logIndex(realIndex int) int {
+	return realIndex - rf.lastIncludedIndex
+}
+
+func (rf *Raft) setLog(log *LogEntry, index int) {
+	rf.logs[rf.logIndex(index)] = *log
+	rf.persist()
+}
+
+func (rf *Raft) appendLog(log *LogEntry) {
+	rf.logs = append(rf.logs, *log)
+	rf.persist()
+}
+
+func (rf *Raft) logLength() int {
+	return rf.lastIncludedIndex + len(rf.logs)
+}
+
+func (rf *Raft) setTerm(term int32) {
+	rf.term = term
+	rf.persist()
+}

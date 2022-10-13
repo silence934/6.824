@@ -1250,6 +1250,7 @@ func TestSnapshotAllCrash2D(t *testing.T) {
 			cfg.connect(i)
 		}
 
+		fmt.Printf("xxx\n")
 		index2 := cfg.one(rand.Int(), servers, true)
 		if index2 < index1+1 {
 			t.Fatalf("index decreased from %v to %v", index1, index2)

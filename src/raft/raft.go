@@ -88,11 +88,16 @@ type Raft struct {
 	lastCallTime time.Time
 	vote         int32 //得票数
 	term         int32
-	logs         []*LogEntry
-	commitIndex  int32
+	logs         []LogEntry
+	commitIndex  int
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+
+	snapshotLock      sync.Mutex
+	lastIncludedTerm  int
+	lastIncludedIndex int
+	snapshot          []byte
 
 	RequestVoteCount  int32
 	HeartbeatCount    int32
@@ -118,7 +123,8 @@ func (rf *Raft) persist() {
 	e.Encode(rf.term)
 	e.Encode(rf.logs)
 	data := w.Bytes()
-	rf.persister.SaveRaftState(data)
+	//rf.persister.SaveRaftState(data)
+	rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
 }
 
 //
@@ -133,12 +139,21 @@ func (rf *Raft) readPersist(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var term int32
-	var logs []*LogEntry
+	var logs []LogEntry
 	if d.Decode(&term) != nil || d.Decode(&logs) != nil {
 		rf.logger.Errorf("decode error")
 	} else {
+		if rf.persister.SnapshotSize() > 0 {
+			rf.snapshot = rf.persister.snapshot
+		}
 		rf.term = term
-		rf.logs = logs
+		if len(logs) > 0 {
+			log := logs[0]
+			rf.logs = logs
+			rf.applyIndex = log.Index
+			rf.lastIncludedIndex = log.Index
+			rf.lastIncludedTerm = log.Term
+		}
 	}
 }
 
@@ -147,9 +162,19 @@ func (rf *Raft) readPersist(data []byte) {
 // have more recent info since it communicate the snapshot on applyCh.
 //
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-
 	// Your code here (2D).
-
+	//lastIncludedIndex--
+	if lastIncludedIndex <= rf.lastIncludedIndex {
+		return false
+	}
+	rf.logger.Printf(dSnap, fmt.Sprintf("CondInstallSnapshot %d", lastIncludedIndex))
+	rf.commitIndex = lastIncludedIndex
+	rf.applyIndex = lastIncludedIndex
+	rf.snapshot = snapshot
+	rf.lastIncludedIndex = lastIncludedIndex
+	rf.lastIncludedTerm = lastIncludedTerm
+	rf.logs = []LogEntry{{Term: lastIncludedTerm, Index: lastIncludedIndex}}
+	rf.persist()
 	return true
 }
 
@@ -158,8 +183,24 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 // service no longer needs the Log through (and including)
 // that Index. Raft should now trim its Log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (2D).
+	rf.snapshotLock.Lock()
+	defer rf.snapshotLock.Unlock()
+	//index--
+	if index <= rf.lastIncludedIndex {
+		return
+	}
+	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot %d", index))
 
+	rf.snapshot = snapshot
+
+	rf.lastIncludedTerm = rf.entry(index).Term
+	if rf.logIndex(index)+1 == len(rf.logs) {
+		rf.logs = []LogEntry{{Term: rf.lastIncludedTerm, Index: index}}
+	} else {
+		rf.logs = append([]LogEntry{{Term: rf.lastIncludedTerm, Index: index}}, rf.logs[rf.logIndex(index+1):]...)
+	}
+	rf.lastIncludedIndex = index
+	rf.persist()
 }
 
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
@@ -176,7 +217,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.logger.Printf(dClient, fmt.Sprintf("al [Index:%d,value:%v]", index, commandToString(command)))
 	}
 
-	return index + 1, term, isLeader
+	return index, term, isLeader
 }
 
 //
@@ -299,22 +340,21 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 	rf.role = follower
 	rf.commitIndex = -1
-	rf.logs = []*LogEntry{}
+	rf.logs = []LogEntry{{Term: -1, Index: 0}}
+
+	rf.applyIndex = 0
+	rf.lastIncludedTerm = -1
+	rf.lastIncludedIndex = 0
 
 	rf.readPersist(persister.ReadRaftState())
+	rf.persist()
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
 	go rf.heartbeatLoop()
 	go rf.logBufferLoop()
 
-	//PrettyDebug(dTimer, "S%d, apply log, log index=%v, log term=%v, log command=%v", rf.me, 1, 2, 3)
-	//PrettyDebug(dInfo, "S%d, apply log, log index=%v, log term=%v, log command=%v", rf.me, 1, 2, 3)
-	//PrettyDebug(dTrace, "S%d, apply log, log index=%v, log term=%v, log command=%v", rf.me, 1, 2, 3)
-
-	//logger.Infof("S%d, apply log, log index=%v, log term=%v, log command=%v", rf.me, 1, 2, 3)
-
-	rf.logger = MakeLog(rf)
+	rf.logger = MakeLogger(rf)
 
 	return rf
 }

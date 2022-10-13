@@ -8,11 +8,11 @@ import (
 
 func (rf *Raft) sendRequestVote(server int) bool {
 
-	length := len(rf.logs)
-	lastLogTerm := -1
+	length := rf.logLength()
+	lastLogTerm := rf.lastIncludedTerm
 
-	if length > 0 {
-		lastLogTerm = rf.logs[len(rf.logs)-1].Term
+	if length-1 > rf.lastIncludedIndex {
+		lastLogTerm = rf.entry(length - 1).Term
 	}
 	args := RequestVoteArgs{
 		Id:          rf.me,
@@ -69,15 +69,19 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		logTerm := resp.LogTerm
 		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v", server, resp))
 
-		if logIndex == -1 {
-			rf.updatePeerIndex(server, peerIndex, logIndex)
+		if logIndex < rf.lastIncludedIndex && rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) {
+			if rf.sendInstallSnapshot(server) {
+				rf.sendHeartbeat(server)
+			}
+		} else if logIndex == -1 && rf.updatePeerIndex(server, peerIndex, logIndex) {
 			rf.sendLogs(logIndex+1, server)
-		} else if rf.logs[logIndex].Term == logTerm {
-			rf.updatePeerIndex(server, peerIndex, logIndex)
+		} else if ((rf.lastIncludedIndex == logIndex && rf.lastIncludedTerm == logTerm) ||
+			rf.entry(logIndex).Term == logTerm) &&
+			rf.updatePeerIndex(server, peerIndex, logIndex) {
+
 			rf.sendLogs(logIndex+1, server)
-		} else {
+		} else if rf.updatePeerIndex(server, peerIndex, resp.FirstIndex-1) {
 			//日志不匹配  重新检测 不必等到下一次检测 可以提高日志同步速度
-			rf.updatePeerIndex(server, peerIndex, resp.FirstIndex-1)
 			rf.sendHeartbeat(server)
 			return true
 		}
@@ -90,7 +94,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 }
 
 func (rf *Raft) sendLogs(startIndex, server int) {
-	length := len(rf.logs)
+	length := rf.logLength()
 	if length != 0 && length == startIndex {
 		rf.sendLogSuccess(startIndex-1, server)
 		return
@@ -98,10 +102,10 @@ func (rf *Raft) sendLogs(startIndex, server int) {
 
 	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
 	for i := startIndex; i < length; i++ {
-		entry := rf.logs[i]
+		entry := rf.entry(i)
 		args := RequestSyncLogArgs{Index: entry.Index, Term: entry.Term, Command: entry.Command}
 		if entry.Index != 0 {
-			args.PreLogTerm = rf.logs[entry.Index-1].Term
+			args.PreLogTerm = rf.entry(entry.Index - 1).Term
 		}
 		req.Args = append(req.Args, &args)
 	}
@@ -129,7 +133,11 @@ func (rf *Raft) sendLogEntryToBuffer(server int, entry *LogEntry) {
 func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 	//args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: int32(commitIndex), CommitLogTerm: rf.logs[commitIndex].Term}
 	//	go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
-	args := CommitLogArgs{CommitIndex: int32(commitIndex), CommitLogTerm: rf.logs[commitIndex].Term}
+	if commitIndex < rf.lastIncludedIndex {
+		//此时可能已经生成了日志快照
+		return
+	}
+	args := CommitLogArgs{CommitIndex: commitIndex, CommitLogTerm: rf.entry(commitIndex).Term}
 	if server == -1 {
 		for _, peer := range rf.peerInfos {
 			select {
@@ -172,11 +180,11 @@ func (rf *Raft) sendCoalesceSyncLog(server int, req *CoalesceSyncLogArgs) {
 
 func (rf *Raft) sendLogSuccess(index, server int) {
 	if rf.isLeader() {
-		if int(rf.commitIndex) >= index {
+		if rf.commitIndex >= index {
 			rf.sendCommitLogToBuffer(index, server)
 			return
 		}
-		log := rf.logs[index]
+		log := rf.entry(index)
 		//log.Complete[server] = true
 		//count := rf.syncCountAddGet(index)
 		count := 1
@@ -196,12 +204,28 @@ func (rf *Raft) sendLogSuccess(index, server int) {
 					}
 				}
 			} else if count > mid {
-				if int(rf.commitIndex) < index {
-					//并发问题
+				if rf.commitIndex < index {
+					//todo 并发问题
 					rf.sendCommitLogToBuffer(index, rf.me)
 				}
 				rf.sendCommitLogToBuffer(index, server)
 			}
 		}
 	}
+}
+
+func (rf *Raft) sendInstallSnapshot(server int) bool {
+	args := InstallSnapshotArgs{
+		Id:                rf.me,
+		Term:              rf.term,
+		LastIncludedTerm:  rf.lastIncludedTerm,
+		LastIncludedIndex: rf.lastIncludedIndex,
+		Data:              rf.snapshot,
+	}
+	reply := InstallSnapshotReply{}
+
+	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d index:%d", server, rf.lastIncludedIndex))
+	ok := rf.peers[server].Call("Raft.InstallSnapshot", &args, &reply)
+
+	return ok && reply.Accept
 }
