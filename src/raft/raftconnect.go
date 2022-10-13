@@ -63,23 +63,25 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 
 	//startTime := time.Now()
 	ok := rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
+	if !ok {
+		ok = rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
+	}
 
 	if ok && resp.Accept && rf.isLeader() {
 		logIndex := resp.LogIndex
 		logTerm := resp.LogTerm
 		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v", server, resp))
 
-		if logIndex < rf.lastIncludedIndex && rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) {
-			if rf.sendInstallSnapshot(server) {
+		rf.snapshotLock.RLock()
+		defer rf.snapshotLock.RUnlock()
+		if logIndex < rf.lastIncludedIndex {
+			if rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) && rf.sendInstallSnapshot(server) {
 				rf.sendHeartbeat(server)
 			}
-		} else if logIndex == -1 && rf.updatePeerIndex(server, peerIndex, logIndex) {
-			rf.sendLogs(logIndex+1, server)
-		} else if ((rf.lastIncludedIndex == logIndex && rf.lastIncludedTerm == logTerm) ||
-			rf.entry(logIndex).Term == logTerm) &&
-			rf.updatePeerIndex(server, peerIndex, logIndex) {
-
-			rf.sendLogs(logIndex+1, server)
+		} else if rf.entry(logIndex).Term == logTerm {
+			if rf.updatePeerIndex(server, peerIndex, logIndex) {
+				rf.sendLogs(logIndex+1, server)
+			}
 		} else if rf.updatePeerIndex(server, peerIndex, resp.FirstIndex-1) {
 			//日志不匹配  重新检测 不必等到下一次检测 可以提高日志同步速度
 			rf.sendHeartbeat(server)

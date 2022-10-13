@@ -54,7 +54,7 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 
 		length := rf.logLength()
 		index := args.Index
-		rf.logger.Printf(dLog, fmt.Sprintf("hb <--%d %d  ,my length%d", args.Id, index, length))
+		rf.logger.Printf(dLog, fmt.Sprintf("hb <--%d %d  ,my length:%d", args.Id, index, length))
 		if index < rf.lastIncludedIndex {
 			reply.LogIndex = rf.lastIncludedIndex
 			reply.LogTerm = rf.lastIncludedTerm
@@ -113,10 +113,10 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 
 	rf.lastCallTime = time.Now()
 
-	rf.commitIndex = commitIndex
 	rf.logger.Printf(dCommit, fmt.Sprintf("commit log=%+v lastIndex:%d", rf.entry(commitIndex), rf.lastIncludedIndex))
 
 	rf.flushLog(commitIndex)
+	rf.commitIndex = commitIndex
 	reply.Accept = true
 }
 
@@ -131,10 +131,8 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 
 	defer func() {
 		rf.unlockSyncLog()
-		if err := recover(); err != nil {
-			rf.logger.Errorf("出现错误:  原logs 长度=%d,\n接收到的数据:%v", rf.logLength(), req.Args)
-			panic(err)
-		}
+		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <--%d   receive=%d",
+			req.Args[0].Index, len(req.Args), req.Id, len(reply.Indexes)))
 	}()
 
 	rf.lastCallTime = time.Now()
@@ -145,7 +143,7 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		preTerm := args.PreLogTerm
 		lastIndex = index
 
-		if rf.logLength() < index || (index != 0 && rf.entry(index-1).Term != preTerm) {
+		if rf.logLength() < index || index <= rf.lastIncludedIndex || rf.entry(index-1).Term != preTerm {
 			//要追加的日志下标在之前的最后一个日志还要后边：不合法的
 			//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
 			return
@@ -163,8 +161,6 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		rf.persist()
 	}
 
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <--%d   receive=%d",
-		req.Args[0].Index, len(req.Args), req.Id, len(reply.Indexes)))
 }
 
 func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
@@ -196,16 +192,12 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 }
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
-	rf.snapshotLock.Lock()
-	defer rf.snapshotLock.Unlock()
 
 	if !rf.isFollower() || args.Term < rf.term || args.LastIncludedIndex <= rf.lastIncludedIndex {
 		rf.logger.Printf(dError, fmt.Sprintf("IS failed:%d %d %d", rf.role, rf.term, args.Term))
 		reply.Accept = false
 		return
 	}
-
-	//reply.Accept = rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
 
 	rf.applyCh <- ApplyMsg{
 		CommandValid:  false,

@@ -94,7 +94,7 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	snapshotLock      sync.Mutex
+	snapshotLock      sync.RWMutex
 	lastIncludedTerm  int
 	lastIncludedIndex int
 	snapshot          []byte
@@ -185,7 +185,6 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.snapshotLock.Lock()
 	defer rf.snapshotLock.Unlock()
-	//index--
 	if index <= rf.lastIncludedIndex {
 		return
 	}
@@ -245,7 +244,7 @@ func (rf *Raft) killed() bool {
 // heartsbeats recently.
 func (rf *Raft) ticker() {
 	for rf.killed() == false {
-		ms := 450 + (rand.Int63() % 150)
+		ms := 150 + (rand.Int63() % 150)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		//logger.Debugf("raft[%d-%d] ms call time:%v", rf.me, rf.role, rf.lastCallTime)
@@ -298,8 +297,8 @@ func (rf *Raft) logBufferLoop() {
 
 					args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: -1, CommitLogTerm: -1}
 
+					end := false
 					for true {
-						end := false
 						select {
 						case commit, ok := <-peer.commitChannel:
 							if ok {
@@ -319,6 +318,7 @@ func (rf *Raft) logBufferLoop() {
 					}
 
 					if args.CommitIndex != -1 {
+						rf.logger.Printf(dCommit, fmt.Sprintf("commit -->%d index:%d", server, args.CommitIndex))
 						go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
 					}
 				}(peer)
@@ -335,6 +335,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.snapshotLock = sync.RWMutex{}
 
 	rf.applyIndex = -1
 	rf.applyCh = applyCh
