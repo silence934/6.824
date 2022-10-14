@@ -114,7 +114,7 @@ func (rf *Raft) sendLogs(startIndex, server int) {
 	rf.sendCoalesceSyncLog(server, &req)
 }
 
-func (rf *Raft) sendLogEntryToBuffer(server int, entry *LogEntry) {
+func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 
 	//保证发送的是对方期望的
 	peerIndex := rf.getPeerIndex(server)
@@ -143,13 +143,13 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 	if server == -1 {
 		for _, peer := range rf.peerInfos {
 			select {
-			case peer.commitChannel <- args:
+			case peer.commitChannel <- &args:
 			default:
 			}
 		}
 	} else {
 		select {
-		case rf.peerInfos[server].commitChannel <- args:
+		case rf.peerInfos[server].commitChannel <- &args:
 		default:
 		}
 	}

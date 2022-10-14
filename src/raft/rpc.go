@@ -113,9 +113,10 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 
 	rf.lastCallTime = time.Now()
 
-	rf.logger.Printf(dCommit, fmt.Sprintf("commit log=%+v lastIndex:%d", rf.entry(commitIndex), rf.lastIncludedIndex))
+	rf.logger.Printf(dCommit, fmt.Sprintf("commit log=%+v applyIndex:%d", rf.entry(commitIndex), rf.applyIndex))
 
 	rf.flushLog(commitIndex)
+
 	rf.commitIndex = commitIndex
 	reply.Accept = true
 }
@@ -148,9 +149,10 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 			//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
 			return
 		} else if rf.logLength() == index {
-			rf.appendLog(&LogEntry{Index: index, Command: args.Command, Term: args.Term})
+			rf.logs = append(rf.logs, LogEntry{Index: index, Command: args.Command, Term: args.Term})
 		} else {
-			rf.setLog(&LogEntry{Index: index, Command: args.Command, Term: args.Term}, index)
+			rf.logs[rf.logIndex(index)] = LogEntry{Index: index, Command: args.Command, Term: args.Term}
+			//rf.setLog(&LogEntry{Index: index, Command: args.Command, Term: args.Term}, index)
 		}
 		reply.Indexes = append(reply.Indexes, &index)
 	}
@@ -158,8 +160,8 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 	if rf.logLength() > lastIndex+1 && rf.entry(lastIndex).Term > rf.entry(lastIndex+1).Term {
 		//去除多余的日志
 		rf.logs = rf.logs[:rf.logIndex(lastIndex+1)]
-		rf.persist()
 	}
+	rf.persist()
 
 }
 
@@ -183,7 +185,8 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		rf.appendLog(&LogEntry{Index: index, Command: req.Command, Term: req.Term})
 		reply.Accept = true
 	} else {
-		rf.setLog(&LogEntry{Index: index, Command: req.Command, Term: req.Term}, index)
+		rf.logs[rf.logIndex(index)] = LogEntry{Index: index, Command: req.Command, Term: req.Term}
+		rf.persist()
 		reply.Accept = true
 	}
 

@@ -62,7 +62,7 @@ type peerInfo struct {
 	checkLogsLock   int32 //0 未进行，1正在进行
 	updateIndexLock sync.Mutex
 	channel         chan RequestSyncLogArgs //日志同步缓存channel
-	commitChannel   chan CommitLogArgs      //日志提交缓存
+	commitChannel   chan *CommitLogArgs     //日志提交缓存
 }
 
 //
@@ -74,6 +74,7 @@ type Raft struct {
 	syncLogLock   int32
 	voteLock      sync.Mutex
 	appendLogLock sync.Mutex
+	flushLogLock  sync.Mutex
 	peers         []*labrpc.ClientEnd // RPC end points of all peers
 	persister     *Persister          // Object to hold this peer's persisted state
 	dead          int32               // set by Kill()

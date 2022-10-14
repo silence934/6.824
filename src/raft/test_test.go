@@ -556,7 +556,6 @@ func TestBackup2B(t *testing.T) {
 	cfg.connect((leader1 + 1) % servers)
 	cfg.connect(other)
 
-	//logger.Errorf("xxxxx")
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
@@ -605,17 +604,6 @@ loop:
 		leader = cfg.checkOneLeader()
 		total1 = rpcs()
 
-		RequestVoteCount := 0
-		HeartbeatCount := 0
-		CommitLogCount := 0
-		SyncLogEntryCount := 0
-		for j := 0; j < servers; j++ {
-			RequestVoteCount += int(cfg.rafts[j].RequestVoteCount)
-			HeartbeatCount += int(cfg.rafts[j].HeartbeatCount)
-			CommitLogCount += int(cfg.rafts[j].CommitLogCount)
-			SyncLogEntryCount += int(cfg.rafts[j].SyncLogEntryCount)
-		}
-
 		iters := 10
 		starti, term, ok := cfg.rafts[leader].Start(1)
 		if !ok {
@@ -653,12 +641,6 @@ loop:
 
 		failed := false
 		total2 = 0
-
-		RequestVoteCount = -RequestVoteCount
-		HeartbeatCount = -HeartbeatCount
-		CommitLogCount = -CommitLogCount
-		SyncLogEntryCount = -SyncLogEntryCount
-
 		for j := 0; j < servers; j++ {
 			if t, _ := cfg.rafts[j].GetState(); t != term {
 				// term changed -- can't expect low RPC counts
@@ -666,10 +648,6 @@ loop:
 				failed = true
 			}
 			total2 += cfg.rpcCount(j)
-			RequestVoteCount += int(cfg.rafts[j].RequestVoteCount)
-			HeartbeatCount += int(cfg.rafts[j].HeartbeatCount)
-			CommitLogCount += int(cfg.rafts[j].CommitLogCount)
-			SyncLogEntryCount += int(cfg.rafts[j].SyncLogEntryCount)
 		}
 
 		if failed {
@@ -677,7 +655,6 @@ loop:
 		}
 
 		if total2-total1 > (iters+1+3)*3 {
-			//fmt.Printf("%d %d %d %d %d \n", RequestVoteCount, HeartbeatCount, CommitLogCount, SyncLogEntryCount, (iters+1+3)*3)
 			t.Fatalf("too many RPCs (%v) for %v entries\n", total2-total1, iters)
 		}
 
@@ -1250,7 +1227,6 @@ func TestSnapshotAllCrash2D(t *testing.T) {
 			cfg.connect(i)
 		}
 
-		fmt.Printf("xxx\n")
 		index2 := cfg.one(rand.Int(), servers, true)
 		if index2 < index1+1 {
 			t.Fatalf("index decreased from %v to %v", index1, index2)

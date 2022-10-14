@@ -43,7 +43,7 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 
 	for i := range rf.peers {
 		if i != rf.me {
-			go rf.sendLogEntryToBuffer(i, entry)
+			go rf.sendLogEntry(i, entry)
 		}
 	}
 
@@ -51,6 +51,8 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 }
 
 func (rf *Raft) flushLog(commitIndex int) {
+	rf.flushLogLock.Lock()
+	defer rf.flushLogLock.Unlock()
 	for i := rf.applyIndex + 1; i <= commitIndex; i++ {
 		item := rf.entry(i)
 		rf.applyCh <- ApplyMsg{
@@ -59,7 +61,7 @@ func (rf *Raft) flushLog(commitIndex int) {
 			CommandIndex:  item.Index,
 			SnapshotValid: false,
 		}
-		//fmt.Printf("raft[%d]向applyCh输入数据 %+v\n", rf.me, item)
+		//rf.logger.Printf(dCommit, fmt.Sprintf("向applyCh输入数据 %+v", item))
 		rf.applyIndex++
 	}
 }
@@ -96,10 +98,10 @@ func (rf *Raft) logIndex(realIndex int) int {
 	return realIndex - rf.lastIncludedIndex
 }
 
-func (rf *Raft) setLog(log *LogEntry, index int) {
-	rf.logs[rf.logIndex(index)] = *log
-	rf.persist()
-}
+//func (rf *Raft) setLog(log *LogEntry, index int) {
+//	rf.logs[rf.logIndex(index)] = *log
+//	rf.persist()
+//}
 
 func (rf *Raft) appendLog(log *LogEntry) {
 	rf.logs = append(rf.logs, *log)

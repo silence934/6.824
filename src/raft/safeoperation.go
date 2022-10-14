@@ -102,7 +102,7 @@ func (rf *Raft) initPeerInfos() bool {
 					index:         rf.logLength() - 1,
 					checkLogsLock: 0,
 					channel:       make(chan RequestSyncLogArgs, 20),
-					commitChannel: make(chan CommitLogArgs, 20),
+					commitChannel: make(chan *CommitLogArgs, 20),
 				}
 			}
 		}
