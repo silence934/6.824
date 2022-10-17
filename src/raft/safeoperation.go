@@ -48,14 +48,6 @@ func (rf *Raft) isFollower() bool {
 	return rf.getRole() == follower
 }
 
-func (rf *Raft) lockSyncLog() bool {
-	return atomic.CompareAndSwapInt32(&rf.syncLogLock, 0, 1)
-}
-
-func (rf *Raft) unlockSyncLog() {
-	rf.syncLogLock = 0
-}
-
 func (rf *Raft) initPeerInfos() bool {
 	if atomic.CompareAndSwapInt32(&rf.initPeers, 0, 1) {
 		defer func() { rf.initPeers = 0 }()

@@ -45,10 +45,9 @@ type ApplyMsg struct {
 }
 
 type LogEntry struct {
-	Index     int
-	Term      int
-	Command   interface{}
-	SyncCount int32
+	Index   int
+	Term    int
+	Command interface{}
 	//Complete  []bool
 }
 
@@ -70,14 +69,14 @@ type peerInfo struct {
 type Raft struct {
 	mu            *sync.Mutex
 	initPeers     int32
-	syncLogLock   int32
 	voteLock      *sync.Mutex
-	appendLogLock *sync.Mutex
 	flushLogLock  *sync.Mutex
-	peers         []*labrpc.ClientEnd // RPC end points of all peers
-	persister     *Persister          // Object to hold this peer's persisted state
-	dead          int32               // set by Kill()
-	logger        Log
+	logUpdateLock *sync.RWMutex
+
+	peers     []*labrpc.ClientEnd // RPC end points of all peers
+	persister *Persister          // Object to hold this peer's persisted state
+	dead      int32               // set by Kill()
+	logger    Log
 
 	me         int // this peer's Index into peers[]
 	applyIndex int //刷入applyCh的下标
@@ -94,7 +93,6 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	snapshotLock      *sync.RWMutex
 	lastIncludedTerm  int
 	lastIncludedIndex int
 	snapshot          []byte
@@ -122,7 +120,7 @@ func (rf *Raft) persist() {
 	e := labgob.NewEncoder(w)
 	e.Encode(rf.term)
 	e.Encode(rf.logs)
-	e.Encode(rf.applyIndex)
+	//e.Encode(rf.applyIndex)
 	data := w.Bytes()
 	//rf.persister.SaveRaftState(data)
 	rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
@@ -141,18 +139,19 @@ func (rf *Raft) readPersist(data []byte) {
 	d := labgob.NewDecoder(r)
 	var term int32
 	var logs []LogEntry
-	var applyIndex int
-	if d.Decode(&term) != nil || d.Decode(&logs) != nil || d.Decode(&applyIndex) != nil {
+	if d.Decode(&term) != nil || d.Decode(&logs) != nil {
 		rf.logger.Errorf("decode error")
 	} else {
 		if rf.persister.SnapshotSize() > 0 {
 			rf.snapshot = rf.persister.snapshot
 		}
 		rf.term = term
-		rf.applyIndex = applyIndex
+		//rf.applyIndex = applyIndex
 		if len(logs) > 0 {
 			log := logs[0]
 			rf.logs = logs
+			//重启过后要重新提交日志
+			rf.applyIndex = log.Index
 			rf.lastIncludedIndex = log.Index
 			rf.lastIncludedTerm = log.Term
 		}
@@ -169,8 +168,8 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	if lastIncludedIndex <= rf.lastIncludedIndex {
 		return false
 	}
-	rf.snapshotLock.Lock()
-	defer rf.snapshotLock.Unlock()
+	rf.logUpdateLock.Lock()
+	defer rf.logUpdateLock.Unlock()
 
 	rf.logger.Printf(dSnap, fmt.Sprintf("CondInstallSnapshot %d", lastIncludedIndex))
 	rf.commitIndex = lastIncludedIndex
@@ -188,8 +187,8 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 // service no longer needs the Log through (and including)
 // that Index. Raft should now trim its Log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	rf.snapshotLock.Lock()
-	defer rf.snapshotLock.Unlock()
+	rf.logUpdateLock.Lock()
+	defer rf.logUpdateLock.Unlock()
 	if index <= rf.lastIncludedIndex {
 		return
 	}
@@ -216,7 +215,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	if isLeader {
 		//complete := make([]bool, len(rf.peers))
 		//complete[rf.me] = true
-		entry := LogEntry{Term: term, Command: command, SyncCount: 1}
+		entry := LogEntry{Term: term, Command: command}
 		index = rf.addLogEntry(&entry)
 		rf.logger.Printf(dClient, fmt.Sprintf("al [Index:%d,value:%v]", index, commandToString(command)))
 	}
@@ -237,6 +236,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
+	rf.logger.Printf(dDrop, "raft node killed")
 	// Your code here, if desired.
 }
 
@@ -342,9 +342,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
-	rf.snapshotLock = &sync.RWMutex{}
+	rf.logUpdateLock = &sync.RWMutex{}
 	rf.voteLock = &sync.Mutex{}
-	rf.appendLogLock = &sync.Mutex{}
 	rf.flushLogLock = &sync.Mutex{}
 	rf.mu = &sync.Mutex{}
 
@@ -356,6 +355,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyIndex = 0
 	rf.lastIncludedTerm = -1
 	rf.lastIncludedIndex = 0
+	rf.logger = MakeLogger(rf)
+	rf.logger.Printf(dDrop, "raft node start")
 
 	rf.readPersist(persister.ReadRaftState())
 	rf.persist()
@@ -364,8 +365,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.ticker()
 	go rf.heartbeatLoop()
 	go rf.logBufferLoop()
-
-	rf.logger = MakeLogger(rf)
 
 	return rf
 }

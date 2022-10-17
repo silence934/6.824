@@ -123,6 +123,7 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server int) {
 	reply := CoalesceSyncLogReply{}
 	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
 
+	//todo 意义?
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	rf.setPeerIndex(server, peerIndex+len(reply.Indexes))
