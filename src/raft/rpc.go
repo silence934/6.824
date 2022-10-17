@@ -120,7 +120,7 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 
 	rf.updateLastTime()
 
-	rf.logger.Printf(dCommit, fmt.Sprintf("commit log=%+v applyIndex:%d", log, rf.applyIndex))
+	rf.logger.Printf(dCommit, fmt.Sprintf("commit log Index:%+v applyIndex:%d", log.Index, rf.applyIndex))
 
 	rf.flushLog(commitIndex)
 
@@ -132,14 +132,13 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
 
 	reply.Indexes = []*int{}
-	if !rf.isFollower() || req.Term < rf.term || !rf.lockSyncLog() {
+	if !rf.isFollower() || req.Term < rf.term {
 		rf.logger.Printf(dLog, fmt.Sprintf("syncLog failed:%d %d %d", rf.role, rf.term, req.Term))
 		return
 	}
-	rf.snapshotLock.Lock()
+	rf.logUpdateLock.Lock()
 	defer func() {
-		rf.snapshotLock.Unlock()
-		rf.unlockSyncLog()
+		rf.logUpdateLock.Unlock()
 		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <--%d   receive=%d",
 			req.Logs[0].Index, len(req.Logs), req.Id, len(reply.Indexes)))
 	}()
@@ -188,9 +187,9 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		rf.logger.Printf(dError, fmt.Sprintf("appendLog failed:%d %d %d", rf.role, rf.term, req.Term))
 		return
 	}
-
+	rf.updateLastTime()
 	defer func() {
-		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d resp:%v <--", req.Index, reply.Accept))
+		rf.logger.Printf(dLog2, fmt.Sprintf("lt index=%d resp:%v <--", req.Index, reply.Accept))
 	}()
 
 	index := req.Index
@@ -206,8 +205,8 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		rf.logs = append(rf.logs, LogEntry{Index: index, Command: req.Command, Term: req.Term})
 		reply.Accept = true
 	} else {
-		rf.snapshotLock.Lock()
-		defer rf.snapshotLock.Unlock()
+		rf.logUpdateLock.Lock()
+		defer rf.logUpdateLock.Unlock()
 		rf.logs[rf.logIndex(index)] = LogEntry{Index: index, Command: req.Command, Term: req.Term}
 		ok2, log2 := rf.entry(index + 1)
 		if ok2 && req.Term > log2.Term {

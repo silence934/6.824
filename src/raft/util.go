@@ -2,6 +2,7 @@ package raft
 
 import (
 	"fmt"
+	"time"
 )
 
 func commandToString(command interface{}) string {
@@ -33,8 +34,8 @@ func (rf *Raft) acceptVote(args *RequestVoteArgs) bool {
 }
 
 func (rf *Raft) addLogEntry(entry *LogEntry) int {
-	rf.appendLogLock.Lock()
-	defer rf.appendLogLock.Unlock()
+	rf.logUpdateLock.Lock()
+	defer rf.logUpdateLock.Unlock()
 
 	//fmt.Printf("%d %d\n", len(rf.logs), rf.lastIncludedIndex)
 	index := rf.logLength()
@@ -67,6 +68,7 @@ func (rf *Raft) flushLog(commitIndex int) {
 		//rf.logger.Printf(dCommit, fmt.Sprintf("向applyCh输入数据 %+v", item))
 		rf.applyIndex++
 	}
+	rf.persist()
 }
 
 //func (rf *Raft) binarySearch(start, end int) int {
@@ -139,4 +141,12 @@ func (rf *Raft) logLength() int {
 func (rf *Raft) setTerm(term int32) {
 	rf.term = term
 	rf.persist()
+}
+
+func (rf *Raft) lastTime() time.Time {
+	return rf.lastCallTime
+}
+
+func (rf *Raft) updateLastTime() {
+	rf.lastCallTime = time.Now()
 }
