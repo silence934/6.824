@@ -188,7 +188,7 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		rf.logger.Printf(dError, fmt.Sprintf("appendLog failed:%d %d %d", rf.role, rf.term, req.Term))
 		return
 	}
-
+	rf.updateLastTime()
 	defer func() {
 		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d resp:%v <--", req.Index, reply.Accept))
 	}()

@@ -2,6 +2,7 @@ package raft
 
 import (
 	"fmt"
+	"time"
 )
 
 func commandToString(command interface{}) string {
@@ -139,4 +140,12 @@ func (rf *Raft) logLength() int {
 func (rf *Raft) setTerm(term int32) {
 	rf.term = term
 	rf.persist()
+}
+
+func (rf *Raft) lastTime() time.Time {
+	return rf.lastCallTime
+}
+
+func (rf *Raft) updateLastTime() {
+	rf.lastCallTime = time.Now()
 }

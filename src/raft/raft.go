@@ -122,6 +122,7 @@ func (rf *Raft) persist() {
 	e := labgob.NewEncoder(w)
 	e.Encode(rf.term)
 	e.Encode(rf.logs)
+	e.Encode(rf.applyIndex)
 	data := w.Bytes()
 	//rf.persister.SaveRaftState(data)
 	rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
@@ -140,17 +141,18 @@ func (rf *Raft) readPersist(data []byte) {
 	d := labgob.NewDecoder(r)
 	var term int32
 	var logs []LogEntry
-	if d.Decode(&term) != nil || d.Decode(&logs) != nil {
+	var applyIndex int
+	if d.Decode(&term) != nil || d.Decode(&logs) != nil || d.Decode(&applyIndex) != nil {
 		rf.logger.Errorf("decode error")
 	} else {
 		if rf.persister.SnapshotSize() > 0 {
 			rf.snapshot = rf.persister.snapshot
 		}
 		rf.term = term
+		rf.applyIndex = applyIndex
 		if len(logs) > 0 {
 			log := logs[0]
 			rf.logs = logs
-			rf.applyIndex = log.Index
 			rf.lastIncludedIndex = log.Index
 			rf.lastIncludedTerm = log.Term
 		}
@@ -171,9 +173,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	defer rf.snapshotLock.Unlock()
 
 	rf.logger.Printf(dSnap, fmt.Sprintf("CondInstallSnapshot %d", lastIncludedIndex))
-	if lastIncludedIndex > rf.commitIndex {
-		rf.commitIndex = lastIncludedIndex
-	}
+	rf.commitIndex = lastIncludedIndex
 	rf.applyIndex = lastIncludedIndex
 	rf.snapshot = snapshot
 	rf.lastIncludedIndex = lastIncludedIndex
@@ -249,7 +249,7 @@ func (rf *Raft) killed() bool {
 // heartsbeats recently.
 func (rf *Raft) ticker() {
 	for rf.killed() == false {
-		ms := 150 + (rand.Int63() % 150)
+		ms := 165 + (rand.Int63() % 150)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		//logger.Debugf("raft[%d-%d] ms call time:%v", rf.me, rf.role, rf.lastCallTime)
@@ -348,7 +348,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.flushLogLock = &sync.Mutex{}
 	rf.mu = &sync.Mutex{}
 
-	rf.applyIndex = -1
 	rf.applyCh = applyCh
 	rf.role = follower
 	rf.commitIndex = -1

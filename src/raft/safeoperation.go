@@ -3,7 +3,6 @@ package raft
 import (
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 func (rf *Raft) getPeerIndex(server int) int {
@@ -47,14 +46,6 @@ func (rf *Raft) isLeader() bool {
 
 func (rf *Raft) isFollower() bool {
 	return rf.getRole() == follower
-}
-
-func (rf *Raft) lastTime() time.Time {
-	return rf.lastCallTime
-}
-
-func (rf *Raft) updateLastTime() {
-	rf.lastCallTime = time.Now()
 }
 
 func (rf *Raft) lockSyncLog() bool {
