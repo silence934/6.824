@@ -7,19 +7,14 @@ import (
 )
 
 func (rf *Raft) sendRequestVote(server int) bool {
-
-	length := rf.logLength()
-	lastLogTerm := rf.lastIncludedTerm
-
-	if length-1 > rf.lastIncludedIndex {
-		lastLogTerm = rf.entry(length - 1).Term
-	}
+	log := rf.lastEntry()
 	args := RequestVoteArgs{
 		Id:          rf.me,
 		Term:        rf.term,
-		LogsLength:  length,
-		LastLogTerm: lastLogTerm,
+		LogsLength:  log.Index + 1,
+		LastLogTerm: log.Term,
 	}
+	//rf.logger.Printf(dLog, fmt.Sprintf("el --> [%d] ", server))
 
 	t := time.Now()
 	reply := RequestVoteReply{}
@@ -29,7 +24,7 @@ func (rf *Raft) sendRequestVote(server int) bool {
 		return false
 	}
 
-	rf.logger.Printf(dLog, fmt.Sprintf("el <-- [%d] %v", server, reply))
+	rf.logger.Printf(dLog, fmt.Sprintf("el --> [%d] %v", server, reply))
 
 	if reply.Accept {
 		v := atomic.AddInt32(&rf.vote, 1)
@@ -54,13 +49,13 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		return false
 	}
 
-	//rf.logger.Infof("heartbeat--->%d", server)
 	term := rf.term
 	peerIndex := rf.getPeerIndex(server)
 	req := RequestHeartbeatArgs{Id: rf.me, Term: term, Index: peerIndex}
 
 	resp := RequestHeartbeatReply{}
 
+	//rf.logger.Infof("heartbeat--->%d", server)
 	//startTime := time.Now()
 	ok := rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
 	if !ok {
@@ -72,15 +67,16 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		logTerm := resp.LogTerm
 		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v", server, resp))
 
-		rf.snapshotLock.RLock()
-		defer rf.snapshotLock.RUnlock()
-		if logIndex < rf.lastIncludedIndex {
+		ok, log := rf.entry(logIndex)
+		if !ok {
+			//logIndex不在当前日志范围内
 			if rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) && rf.sendInstallSnapshot(server) {
 				rf.sendHeartbeat(server)
 			}
-		} else if rf.entry(logIndex).Term == logTerm {
+		} else if log.Term == logTerm {
+			//日志匹配 发送logIndex之后的所有日志
 			if rf.updatePeerIndex(server, peerIndex, logIndex) {
-				rf.sendLogs(logIndex+1, server)
+				rf.sendCoalesceSyncLog(logIndex+1, server)
 			}
 		} else if rf.updatePeerIndex(server, peerIndex, resp.FirstIndex-1) {
 			//日志不匹配  重新检测 不必等到下一次检测 可以提高日志同步速度
@@ -95,23 +91,50 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 	return false
 }
 
-func (rf *Raft) sendLogs(startIndex, server int) {
+func (rf *Raft) sendCoalesceSyncLog(startIndex, server int) {
 	length := rf.logLength()
-	if length != 0 && length == startIndex {
+
+	if length == startIndex {
+		//没有日志发送 尝试提交日志 可以解决并发问题导致没有提交的日志
 		rf.sendLogSuccess(startIndex-1, server)
 		return
 	}
-
-	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term}
-	for i := startIndex; i < length; i++ {
-		entry := rf.entry(i)
-		args := RequestSyncLogArgs{Index: entry.Index, Term: entry.Term, Command: entry.Command}
-		if entry.Index != 0 {
-			args.PreLogTerm = rf.entry(entry.Index - 1).Term
-		}
-		req.Args = append(req.Args, &args)
+	//保证发送的第一个日志是对方期望的
+	peerIndex := rf.getPeerIndex(server)
+	ok, firstLog := rf.entry(startIndex)
+	if !ok || peerIndex+1 != firstLog.Index {
+		rf.logger.Printf(dError, fmt.Sprintf("ratf[%d] exp:%d ,first:%d", server, peerIndex+1, startIndex))
+		return
 	}
-	rf.sendCoalesceSyncLog(server, &req)
+	_, preLog := rf.entry(startIndex - 1)
+	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, Logs: []*RequestSyncLogArgs{{Index: firstLog.Index, Term: firstLog.Term, Command: firstLog.Command, PreLogTerm: preLog.Term}}}
+	preLog = firstLog
+
+	for i := startIndex + 1; i < length; i++ {
+		ok, log := rf.entry(i)
+		if ok {
+			req.Logs = append(req.Logs, &RequestSyncLogArgs{Index: log.Index, Term: log.Term, Command: log.Command, PreLogTerm: preLog.Term})
+		} else {
+			return
+		}
+		preLog = log
+	}
+
+	reply := CoalesceSyncLogReply{}
+	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.setPeerIndex(server, peerIndex+len(reply.Indexes))
+
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
+		req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
+
+	if ok && rf.isLeader() {
+		for _, data := range reply.Indexes {
+			rf.sendLogSuccess(*data, server)
+		}
+	}
 }
 
 func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
@@ -122,7 +145,11 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 		return
 	}
 
-	req := RequestSyncLogArgs{PreLogTerm: entry.Term, Index: entry.Index, Term: entry.Term, Command: entry.Command}
+	t, pre := rf.entry(entry.Index - 1)
+	if !t {
+		return
+	}
+	req := RequestSyncLogArgs{PreLogTerm: pre.Term, Index: entry.Index, Term: entry.Term, Command: entry.Command}
 	reply := RequestSyncLogReply{}
 	ok := rf.peers[server].Call("Raft.AppendLog", &req, &reply)
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt index:%d -->%d %v", req.Index, server, reply.Accept))
@@ -135,11 +162,12 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 	//args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: int32(commitIndex), CommitLogTerm: rf.logs[commitIndex].Term}
 	//	go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
-	if commitIndex < rf.lastIncludedIndex {
+	ok, log := rf.entry(commitIndex)
+	if !ok {
 		//此时可能已经生成了日志快照
 		return
 	}
-	args := CommitLogArgs{CommitIndex: commitIndex, CommitLogTerm: rf.entry(commitIndex).Term}
+	args := CommitLogArgs{CommitIndex: commitIndex, CommitLogTerm: log.Term}
 	if server == -1 {
 		for _, peer := range rf.peerInfos {
 			select {
@@ -155,40 +183,17 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 	}
 }
 
-func (rf *Raft) sendCoalesceSyncLog(server int, req *CoalesceSyncLogArgs) {
-
-	//保证发送的第一个日志是对方期望的
-	peerIndex := rf.getPeerIndex(server)
-	if len(req.Args) == 0 || peerIndex+1 != req.Args[0].Index {
-		return
-	}
-
-	reply := CoalesceSyncLogReply{}
-	ok := rf.peers[server].Call("Raft.CoalesceSyncLog", req, &reply)
-
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	rf.setPeerIndex(server, peerIndex+len(reply.Indexes))
-
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
-		req.Args[0].Index, len(req.Args), server, ok, len(reply.Indexes)))
-
-	if ok && rf.isLeader() {
-		for _, data := range reply.Indexes {
-			rf.sendLogSuccess(*data, server)
-		}
-	}
-}
-
 func (rf *Raft) sendLogSuccess(index, server int) {
 	if rf.isLeader() {
 		if rf.commitIndex >= index {
 			rf.sendCommitLogToBuffer(index, server)
 			return
 		}
-		log := rf.entry(index)
-		//log.Complete[server] = true
-		//count := rf.syncCountAddGet(index)
+		ok, log := rf.entry(index)
+		if !ok {
+			return
+		}
+
 		count := 1
 
 		for _, d := range rf.peerInfos {
@@ -199,6 +204,7 @@ func (rf *Raft) sendLogSuccess(index, server int) {
 		mid := (len(rf.peers) >> 1) + 1
 		if log.Term == int(rf.term) {
 			if count == mid {
+				//第一次到达一半的时候，向之前同步完成的节点发送提交请求
 				rf.sendCommitLogToBuffer(index, rf.me)
 				for _, d := range rf.peerInfos {
 					if d.index >= index {
@@ -206,8 +212,8 @@ func (rf *Raft) sendLogSuccess(index, server int) {
 					}
 				}
 			} else if count > mid {
+				//后续的可以直接向这个节点发送提交，可能存在并发问题，需要依赖心跳检测补偿
 				if rf.commitIndex < index {
-					//todo 并发问题
 					rf.sendCommitLogToBuffer(index, rf.me)
 				}
 				rf.sendCommitLogToBuffer(index, server)

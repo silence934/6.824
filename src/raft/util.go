@@ -20,7 +20,7 @@ func (rf *Raft) acceptVote(args *RequestVoteArgs) bool {
 		return true
 	}
 
-	lastLog := rf.entry(rf.logLength() - 1)
+	lastLog := rf.lastEntry()
 
 	if lastLog.Term < args.LastLogTerm {
 		return true
@@ -54,7 +54,10 @@ func (rf *Raft) flushLog(commitIndex int) {
 	rf.flushLogLock.Lock()
 	defer rf.flushLogLock.Unlock()
 	for i := rf.applyIndex + 1; i <= commitIndex; i++ {
-		item := rf.entry(i)
+		ok, item := rf.entry(i)
+		if !ok {
+			return
+		}
 		rf.applyCh <- ApplyMsg{
 			CommandValid:  true,
 			Command:       item.Command,
@@ -90,8 +93,29 @@ func (rf *Raft) flushLog(commitIndex int) {
 //	return false
 //}
 
-func (rf *Raft) entry(index int) *LogEntry {
-	return &rf.logs[rf.logIndex(index)]
+func (rf *Raft) entry(index int) (b bool, l *LogEntry) {
+	defer func() {
+		//乐观认为可以直接获取，出现并发时直接返回false(小概率事件，可以依赖心跳补偿)
+		if err := recover(); err != nil {
+			rf.logger.Printf(dError, fmt.Sprintf("entry() err:%v", err))
+			b = false
+			l = nil
+		}
+		if l != nil && l.Index != index {
+			rf.logger.Printf(dError, fmt.Sprintf("entry() err expIndex:%d ,but got:%d", index, l.Index))
+			b = false
+			l = nil
+		}
+	}()
+	actualIndex := rf.logIndex(index)
+	if actualIndex < 0 || actualIndex >= len(rf.logs) {
+		return false, nil
+	}
+	return true, &rf.logs[actualIndex]
+}
+
+func (rf *Raft) lastEntry() *LogEntry {
+	return &rf.logs[len(rf.logs)-1]
 }
 
 func (rf *Raft) logIndex(realIndex int) int {

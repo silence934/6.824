@@ -58,9 +58,8 @@ func (t *LogEntry) String() string {
 
 type peerInfo struct {
 	serverId        int
-	index           int   //对方和自己相同的日志下标
-	checkLogsLock   int32 //0 未进行，1正在进行
-	updateIndexLock sync.Mutex
+	index           int //对方和自己相同的日志下标
+	updateIndexLock *sync.RWMutex
 	channel         chan RequestSyncLogArgs //日志同步缓存channel
 	commitChannel   chan *CommitLogArgs     //日志提交缓存
 }
@@ -69,12 +68,12 @@ type peerInfo struct {
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	mu            sync.Mutex
+	mu            *sync.Mutex
 	initPeers     int32
 	syncLogLock   int32
-	voteLock      sync.Mutex
-	appendLogLock sync.Mutex
-	flushLogLock  sync.Mutex
+	voteLock      *sync.Mutex
+	appendLogLock *sync.Mutex
+	flushLogLock  *sync.Mutex
 	peers         []*labrpc.ClientEnd // RPC end points of all peers
 	persister     *Persister          // Object to hold this peer's persisted state
 	dead          int32               // set by Kill()
@@ -95,7 +94,7 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	snapshotLock      sync.RWMutex
+	snapshotLock      *sync.RWMutex
 	lastIncludedTerm  int
 	lastIncludedIndex int
 	snapshot          []byte
@@ -168,8 +167,13 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	if lastIncludedIndex <= rf.lastIncludedIndex {
 		return false
 	}
+	rf.snapshotLock.Lock()
+	defer rf.snapshotLock.Unlock()
+
 	rf.logger.Printf(dSnap, fmt.Sprintf("CondInstallSnapshot %d", lastIncludedIndex))
-	rf.commitIndex = lastIncludedIndex
+	if lastIncludedIndex > rf.commitIndex {
+		rf.commitIndex = lastIncludedIndex
+	}
 	rf.applyIndex = lastIncludedIndex
 	rf.snapshot = snapshot
 	rf.lastIncludedIndex = lastIncludedIndex
@@ -192,8 +196,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot %d", index))
 
 	rf.snapshot = snapshot
-
-	rf.lastIncludedTerm = rf.entry(index).Term
+	//commitIndex不需要修改
+	rf.lastIncludedTerm = rf.logs[rf.logIndex(index)].Term
 	if rf.logIndex(index)+1 == len(rf.logs) {
 		rf.logs = []LogEntry{{Term: rf.lastIncludedTerm, Index: index}}
 	} else {
@@ -250,6 +254,8 @@ func (rf *Raft) ticker() {
 
 		//logger.Debugf("raft[%d-%d] ms call time:%v", rf.me, rf.role, rf.lastCallTime)
 		if !rf.isLeader() {
+			//rf.logger.Printf(dLog, fmt.Sprintf("ticker timeout  %v  ", time.Now().Sub(rf.lastTime())))
+
 			if !time.Now().After(rf.lastTime().Add(time.Duration(ms) * time.Millisecond)) {
 				continue
 			}
@@ -336,7 +342,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
-	rf.snapshotLock = sync.RWMutex{}
+	rf.snapshotLock = &sync.RWMutex{}
+	rf.voteLock = &sync.Mutex{}
+	rf.appendLogLock = &sync.Mutex{}
+	rf.flushLogLock = &sync.Mutex{}
+	rf.mu = &sync.Mutex{}
 
 	rf.applyIndex = -1
 	rf.applyCh = applyCh

@@ -12,9 +12,10 @@ type RequestHeartbeatArgs struct {
 type RequestHeartbeatReply struct {
 	Accept bool
 
-	FirstIndex int
-	LogIndex   int
-	LogTerm    int
+	FirstIndex  int
+	LogIndex    int
+	LogTerm     int
+	CommitIndex int
 }
 
 type RequestSyncLogArgs struct {
@@ -72,7 +73,7 @@ type CommitLogReply struct {
 type CoalesceSyncLogArgs struct {
 	Id   int
 	Term int32
-	Args []*RequestSyncLogArgs
+	Logs []*RequestSyncLogArgs
 }
 
 type CoalesceSyncLogReply struct {

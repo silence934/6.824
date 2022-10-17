@@ -1,8 +1,7 @@
 package raft
 
 import (
-	lock2 "6.824/lock"
-	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -11,7 +10,6 @@ func (rf *Raft) getPeerIndex(server int) int {
 	rf.peerInfos[server].updateIndexLock.Lock()
 	defer rf.peerInfos[server].updateIndexLock.Unlock()
 	index := rf.peerInfos[server].index
-	//logger.Infof("raft[%d] getPeerIndex[%d]  --> %d", rf.me, server, index)
 	return index
 }
 
@@ -55,39 +53,16 @@ func (rf *Raft) lastTime() time.Time {
 	return rf.lastCallTime
 }
 
+func (rf *Raft) updateLastTime() {
+	rf.lastCallTime = time.Now()
+}
+
 func (rf *Raft) lockSyncLog() bool {
 	return atomic.CompareAndSwapInt32(&rf.syncLogLock, 0, 1)
 }
 
 func (rf *Raft) unlockSyncLog() {
 	rf.syncLogLock = 0
-}
-
-func (rf *Raft) lockCheckLog(server int, timeout time.Duration) *lock2.Lock {
-	return lock2.Make(&rf.peerInfos[server].checkLogsLock, timeout, strconv.Itoa(rf.me)+" "+strconv.Itoa(server))
-	//lock := atomic.CompareAndSwapInt32(&rf.peerInfos[server].checkLogsLock, 0, 1)
-	//var timer *time.Timer
-	//if lock {
-	//	wg := sync.WaitGroup{}
-	//	wg.Add(1)
-	//	go func(s int, out time.Duration) {
-	//		timer = time.NewTimer(out)
-	//		wg.Done()
-	//		<-timer.C
-	//		if !timer.Stop() {
-	//			//logger.Errorf("超时")
-	//			rf.unlockCheckLog(s)
-	//		}
-	//	}(server, timeout)
-	//	wg.Wait()
-	//}
-	//logger.Infof("raft[%d] 上锁 %d  %v  %d", rf.me, server, lock, atomic.LoadInt32(&rf.peerInfos[server].checkLogsLock))
-	//return lock, timer
-}
-
-func (rf *Raft) unlockCheckLog(server int) {
-	//logger.Infof("raft[%d] 解锁 %d", rf.me, server)
-	rf.peerInfos[server].checkLogsLock = 0
 }
 
 func (rf *Raft) initPeerInfos() bool {
@@ -98,11 +73,11 @@ func (rf *Raft) initPeerInfos() bool {
 			rf.peerInfos = make([]*peerInfo, len(rf.peers))
 			for i := 0; i < len(rf.peerInfos); i++ {
 				rf.peerInfos[i] = &peerInfo{
-					serverId:      i,
-					index:         rf.logLength() - 1,
-					checkLogsLock: 0,
-					channel:       make(chan RequestSyncLogArgs, 20),
-					commitChannel: make(chan *CommitLogArgs, 20),
+					serverId:        i,
+					index:           rf.logLength() - 1,
+					updateIndexLock: &sync.RWMutex{},
+					channel:         make(chan RequestSyncLogArgs, 20),
+					commitChannel:   make(chan *CommitLogArgs, 20),
 				}
 			}
 		}

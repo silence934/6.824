@@ -3,7 +3,6 @@ package raft
 import (
 	"fmt"
 	"sync/atomic"
-	"time"
 )
 
 //
@@ -29,7 +28,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.role = follower
 			rf.setTerm(term)
 			if rf.acceptVote(args) {
-				rf.lastCallTime = time.Now()
+				rf.updateLastTime()
 				reply.Accept = true
 			} else {
 				reply.Accept = false
@@ -46,52 +45,57 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 	atomic.AddInt32(&rf.HeartbeatCount, 1)
 	term := rf.term
 	if term <= args.Term {
-		rf.lastCallTime = time.Now()
+		rf.updateLastTime()
 		rf.role = follower
 		rf.setTerm(args.Term)
 
 		reply.Accept = true
+		reply.CommitIndex = rf.commitIndex
 
 		length := rf.logLength()
-		index := args.Index
-		rf.logger.Printf(dLog, fmt.Sprintf("hb <--%d %d  ,my length:%d", args.Id, index, length))
-		if index < rf.lastIncludedIndex {
-			reply.LogIndex = rf.lastIncludedIndex
-			reply.LogTerm = rf.lastIncludedTerm
-		} else if index >= length {
-			//fmt.Printf("%d %d\n", rf.lastIncludedIndex, length)
-			reply.LogIndex = length - 1
-			reply.LogTerm = rf.entry(length - 1).Term
+		reqIndex := args.Index
+		rf.logger.Printf(dLog, fmt.Sprintf("hb <-- id:%d index:%d  ,my length:%d", args.Id, reqIndex, length))
+		ok, log := rf.entry(reqIndex)
+		if ok {
+			reply.LogTerm = log.Term
+			reply.LogIndex = reqIndex
 			//寻找这个term第一次出现的index
-			i := length - 1
-			for i > rf.lastIncludedIndex && rf.entry(i).Term == reply.LogTerm {
-				i--
+			i := reqIndex - 1
+			for true {
+				o, l := rf.entry(i)
+				if o && l.Term == log.Term {
+					i--
+				} else {
+					break
+				}
 			}
-			if rf.entry(i).Term == reply.LogTerm {
-				reply.FirstIndex = i
-			} else {
-				reply.FirstIndex = i + 1
-			}
-
+			reply.FirstIndex = i + 1
 		} else {
-
-			reply.LogTerm = rf.entry(index).Term
-			reply.LogIndex = index
-			//寻找这个term第一次出现的index
-			i := index
-			for i > rf.lastIncludedIndex && rf.entry(i).Term == reply.LogTerm {
-				i--
-			}
-			if rf.entry(i).Term == reply.LogTerm {
-				reply.FirstIndex = i
-			} else {
+			if reqIndex < rf.lastIncludedIndex {
+				reply.LogIndex = rf.lastIncludedIndex
+				reply.FirstIndex = rf.lastIncludedIndex
+				reply.LogTerm = rf.lastIncludedTerm
+			} else if reqIndex >= length {
+				log := rf.lastEntry()
+				reply.LogIndex = log.Index
+				reply.LogTerm = log.Term
+				//寻找这个term第一次出现的index
+				i := log.Index - 1
+				for true {
+					o, l := rf.entry(i)
+					if o && l.Term == log.Term {
+						i--
+					} else {
+						break
+					}
+				}
 				reply.FirstIndex = i + 1
 			}
-
 		}
 
 	} else {
 		reply.Accept = false
+		rf.logger.Printf(dLog, fmt.Sprintf("hb <-- id:%d term:%d false", args.Id, args.Term))
 	}
 	//logger.Debugf("[heartbeat] [%d %d] -----> [%d %d]  resp:%v", args.Id, args.Term, rf.me, term, reply.Accept)
 
@@ -104,16 +108,19 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 	term := rf.term
 	currentCommitIndex := rf.commitIndex
 
-	if term > args.Term || currentCommitIndex >= commitIndex ||
-		rf.logLength() <= commitIndex || rf.entry(commitIndex).Term != args.CommitLogTerm {
+	ok, log := rf.entry(commitIndex)
+	if term > args.Term || //节点term不合法
+		currentCommitIndex >= commitIndex || //之前已提交过
+		!ok || //不在范围内
+		log.Term != args.CommitLogTerm { //日志term不合法
 
 		reply.Accept = false
 		return
 	}
 
-	rf.lastCallTime = time.Now()
+	rf.updateLastTime()
 
-	rf.logger.Printf(dCommit, fmt.Sprintf("commit log=%+v applyIndex:%d", rf.entry(commitIndex), rf.applyIndex))
+	rf.logger.Printf(dCommit, fmt.Sprintf("commit log=%+v applyIndex:%d", log, rf.applyIndex))
 
 	rf.flushLog(commitIndex)
 
@@ -129,37 +136,44 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		rf.logger.Printf(dLog, fmt.Sprintf("syncLog failed:%d %d %d", rf.role, rf.term, req.Term))
 		return
 	}
-
+	rf.snapshotLock.Lock()
 	defer func() {
+		rf.snapshotLock.Unlock()
 		rf.unlockSyncLog()
 		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <--%d   receive=%d",
-			req.Args[0].Index, len(req.Args), req.Id, len(reply.Indexes)))
+			req.Logs[0].Index, len(req.Logs), req.Id, len(reply.Indexes)))
 	}()
 
-	rf.lastCallTime = time.Now()
+	rf.updateLastTime()
 
-	var lastIndex = 0
-	for _, args := range req.Args {
+	var lastLog LogEntry
+	for _, args := range req.Logs {
 		index := args.Index
 		preTerm := args.PreLogTerm
-		lastIndex = index
 
-		if rf.logLength() < index || index <= rf.lastIncludedIndex || rf.entry(index-1).Term != preTerm {
-			//要追加的日志下标在之前的最后一个日志还要后边：不合法的
+		ok, preLog := rf.entry(index - 1)
+		if !ok || preLog.Term != preTerm {
+			//要追加的日志不在接受日志范围内(lastIndex,logLength-1)
 			//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
+			rf.logger.Printf(dError, fmt.Sprintf("pre:%v  bug got:%v", preLog, args))
 			return
-		} else if rf.logLength() == index {
-			rf.logs = append(rf.logs, LogEntry{Index: index, Command: args.Command, Term: args.Term})
 		} else {
-			rf.logs[rf.logIndex(index)] = LogEntry{Index: index, Command: args.Command, Term: args.Term}
-			//rf.setLog(&LogEntry{Index: index, Command: args.Command, Term: args.Term}, index)
+			entry := LogEntry{Index: index, Command: args.Command, Term: args.Term}
+			lastLog = entry
+			if rf.logLength() == index {
+				rf.logs = append(rf.logs, entry)
+			} else {
+				rf.logs[rf.logIndex(index)] = entry
+			}
 		}
 		reply.Indexes = append(reply.Indexes, &index)
 	}
 
-	if rf.logLength() > lastIndex+1 && rf.entry(lastIndex).Term > rf.entry(lastIndex+1).Term {
+	ok2, log2 := rf.entry(lastLog.Index + 1)
+	if ok2 && lastLog.Term > log2.Term {
 		//去除多余的日志
-		rf.logs = rf.logs[:rf.logIndex(lastIndex+1)]
+
+		rf.logs = rf.logs[:rf.logIndex(lastLog.Index+1)]
 	}
 	rf.persist()
 
@@ -167,6 +181,7 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 
 func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
+
 	reply.Accept = false
 
 	if !rf.isFollower() || req.Term < int(rf.term) {
@@ -174,24 +189,35 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		return
 	}
 
+	defer func() {
+		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d resp:%v <--", req.Index, reply.Accept))
+	}()
+
 	index := req.Index
 	preTerm := req.PreLogTerm
 
-	if rf.logLength() < index || index <= rf.lastIncludedIndex || (index != 0 && rf.entry(index-1).Term != preTerm) {
+	ok, log := rf.entry(index - 1)
+
+	if !ok || log.Term != preTerm || index <= rf.commitIndex {
 		//要追加的日志下标在之前的最后一个日志还要后边：不合法的
 		//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
 		return
 	} else if rf.logLength() == index {
-		rf.appendLog(&LogEntry{Index: index, Command: req.Command, Term: req.Term})
+		rf.logs = append(rf.logs, LogEntry{Index: index, Command: req.Command, Term: req.Term})
 		reply.Accept = true
 	} else {
+		rf.snapshotLock.Lock()
+		defer rf.snapshotLock.Unlock()
 		rf.logs[rf.logIndex(index)] = LogEntry{Index: index, Command: req.Command, Term: req.Term}
-		rf.persist()
+		ok2, log2 := rf.entry(index + 1)
+		if ok2 && req.Term > log2.Term {
+			//去除多余的日志
+			rf.logs = rf.logs[:rf.logIndex(index+1)]
+		}
 		reply.Accept = true
 	}
 
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=1 <--",
-		req.Index))
+	rf.persist()
 }
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
