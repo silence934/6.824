@@ -150,14 +150,16 @@ func (rf *Raft) readPersist(data []byte) {
 		if rf.persister.SnapshotSize() > 0 {
 			rf.snapshot = rf.persister.ReadSnapshot()
 		}
-		rf.term = term
-		rf.logs = logs
-		rf.logger.Printf(dPersist, fmt.Sprintf("readPersist,logs length:%d", len(logs)))
-		log := logs[0]
-		//重启过后要重新提交日志
-		rf.applyIndex = log.Index
-		rf.lastIncludedIndex = log.Index
-		rf.lastIncludedTerm = log.Term
+		if len(logs) > 0 {
+			rf.term = term
+			rf.logs = logs
+			rf.logger.Printf(dPersist, fmt.Sprintf("readPersist,logs length:%d", len(logs)))
+			log := logs[0]
+			//重启过后要重新提交日志
+			rf.applyIndex = log.Index
+			rf.lastIncludedIndex = log.Index
+			rf.lastIncludedTerm = log.Term
+		}
 	}
 }
 

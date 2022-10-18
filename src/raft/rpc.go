@@ -190,8 +190,8 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 	}
 	rf.updateLastTime()
 	defer func() {
-		rf.persist()
 		rf.logger.Printf(dLog2, fmt.Sprintf("lt index=%d resp:%v <--", req.Index, reply.Accept))
+		rf.persist()
 	}()
 
 	index := req.Index
