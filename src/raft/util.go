@@ -40,7 +40,8 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 	//fmt.Printf("%d %d\n", len(rf.logs), rf.lastIncludedIndex)
 	index := rf.logLength()
 	entry.Index = index
-	rf.appendLog(entry)
+	rf.logs = append(rf.logs, *entry)
+	go rf.persist()
 
 	for i := range rf.peers {
 		if i != rf.me {
@@ -127,11 +128,6 @@ func (rf *Raft) logIndex(realIndex int) int {
 //	rf.logs[rf.logIndex(index)] = *log
 //	rf.persist()
 //}
-
-func (rf *Raft) appendLog(log *LogEntry) {
-	rf.logs = append(rf.logs, *log)
-	rf.persist()
-}
 
 func (rf *Raft) logLength() int {
 	return rf.lastIncludedIndex + len(rf.logs)

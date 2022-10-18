@@ -124,16 +124,16 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server int) {
 	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
 
 	//todo 意义?
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	rf.setPeerIndex(server, peerIndex+len(reply.Indexes))
+	//rf.mu.Lock()
+	//defer rf.mu.Unlock()
+	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
+		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
+			req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
 
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
-		req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
-
-	if ok && rf.isLeader() {
-		for _, data := range reply.Indexes {
-			rf.sendLogSuccess(*data, server)
+		if ok && rf.isLeader() {
+			for _, data := range reply.Indexes {
+				rf.sendLogSuccess(*data, server)
+			}
 		}
 	}
 }
@@ -153,6 +153,9 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 	req := RequestSyncLogArgs{PreLogTerm: pre.Term, Index: entry.Index, Term: entry.Term, Command: entry.Command}
 	reply := RequestSyncLogReply{}
 	ok := rf.peers[server].Call("Raft.AppendLog", &req, &reply)
+
+	//rf.mu.Lock()
+	//defer rf.mu.Unlock()
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt index:%d -->%d %v", req.Index, server, reply.Accept))
 
 	if ok && reply.Accept && rf.updatePeerIndex(server, peerIndex, entry.Index) {
@@ -224,6 +227,8 @@ func (rf *Raft) sendLogSuccess(index, server int) {
 }
 
 func (rf *Raft) sendInstallSnapshot(server int) bool {
+	rf.logUpdateLock.Lock()
+	//不是原子操作 存在并发问题
 	args := InstallSnapshotArgs{
 		Id:                rf.me,
 		Term:              rf.term,
@@ -231,6 +236,7 @@ func (rf *Raft) sendInstallSnapshot(server int) bool {
 		LastIncludedIndex: rf.lastIncludedIndex,
 		Data:              rf.snapshot,
 	}
+	rf.logUpdateLock.Unlock()
 	reply := InstallSnapshotReply{}
 
 	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d index:%d", server, rf.lastIncludedIndex))

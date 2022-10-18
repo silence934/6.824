@@ -140,7 +140,7 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 	rf.logUpdateLock.Lock()
 	defer func() {
 		rf.logUpdateLock.Unlock()
-		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <--%d   receive=%d",
+		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <-- %d receive=%d",
 			req.Logs[0].Index, len(req.Logs), req.Id, len(reply.Indexes)))
 	}()
 
