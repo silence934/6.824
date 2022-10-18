@@ -103,6 +103,8 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 
 func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 	atomic.AddInt32(&rf.CommitLogCount, 1)
+	rf.commitLogLock.Lock()
+	defer rf.commitLogLock.Unlock()
 
 	commitIndex := args.CommitIndex
 	term := rf.term
@@ -124,7 +126,6 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 
 	rf.flushLog(commitIndex)
 
-	rf.commitIndex = commitIndex
 	reply.Accept = true
 }
 
@@ -189,6 +190,7 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 	}
 	rf.updateLastTime()
 	defer func() {
+		rf.persist()
 		rf.logger.Printf(dLog2, fmt.Sprintf("lt index=%d resp:%v <--", req.Index, reply.Accept))
 	}()
 
@@ -216,7 +218,6 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		reply.Accept = true
 	}
 
-	rf.persist()
 }
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {

@@ -70,7 +70,8 @@ type Raft struct {
 	mu            *sync.Mutex
 	initPeers     int32
 	voteLock      *sync.Mutex
-	flushLogLock  *sync.Mutex
+	commitLogLock *sync.Mutex
+	persistLock   *sync.Mutex
 	logUpdateLock *sync.RWMutex
 
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
@@ -116,6 +117,9 @@ func (rf *Raft) GetState() (int, bool) {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
+	//不知道为什么并发下似乎没有持久化成功
+	rf.persistLock.Lock()
+	defer rf.persistLock.Unlock()
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	e.Encode(rf.term)
@@ -124,7 +128,7 @@ func (rf *Raft) persist() {
 	data := w.Bytes()
 	//rf.persister.SaveRaftState(data)
 	rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
-	rf.logger.Printf(dPersist, fmt.Sprintf("persist logsLength:%d", len(rf.logs)))
+	rf.logger.Printf(dPersist, fmt.Sprintf("persist,logs length:%d", len(rf.logs)))
 }
 
 //
@@ -148,7 +152,7 @@ func (rf *Raft) readPersist(data []byte) {
 		}
 		rf.term = term
 		rf.logs = logs
-		rf.logger.Printf(dPersist, fmt.Sprintf("readPersist logsLength:%d", len(logs)))
+		rf.logger.Printf(dPersist, fmt.Sprintf("readPersist,logs length:%d", len(logs)))
 		log := logs[0]
 		//重启过后要重新提交日志
 		rf.applyIndex = log.Index
@@ -201,7 +205,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	} else {
 		rf.logs = append([]LogEntry{{Term: rf.lastIncludedTerm, Index: index}}, rf.logs[rf.logIndex(index+1):]...)
 	}
-	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot index:%d  logLength:%d", index, len(rf.logs)))
+	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot index:%d,log length:%d", index, len(rf.logs)))
 	rf.lastIncludedIndex = index
 	rf.persist()
 }
@@ -344,7 +348,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.logUpdateLock = &sync.RWMutex{}
 	rf.voteLock = &sync.Mutex{}
-	rf.flushLogLock = &sync.Mutex{}
+	rf.commitLogLock = &sync.Mutex{}
 	rf.mu = &sync.Mutex{}
 
 	rf.applyCh = applyCh

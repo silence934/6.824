@@ -52,8 +52,6 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 }
 
 func (rf *Raft) flushLog(commitIndex int) {
-	rf.flushLogLock.Lock()
-	defer rf.flushLogLock.Unlock()
 	for i := rf.applyIndex + 1; i <= commitIndex; i++ {
 		ok, item := rf.entry(i)
 		if !ok {
@@ -67,6 +65,7 @@ func (rf *Raft) flushLog(commitIndex int) {
 		}
 		//rf.logger.Printf(dCommit, fmt.Sprintf("向applyCh输入数据 %+v", item))
 		rf.applyIndex++
+		rf.commitIndex = rf.applyIndex
 	}
 	//rf.persist()
 }
