@@ -191,7 +191,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	if index <= rf.lastIncludedIndex {
 		return
 	}
-	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot %d", index))
+	//rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot %d", index))
 
 	rf.snapshot = snapshot
 	//commitIndex不需要修改
@@ -359,7 +359,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.logger.Printf(dDrop, "raft node start")
 
 	rf.readPersist(persister.ReadRaftState())
-	rf.persist()
+	//rf.persist()
 
 	// start ticker goroutine to start elections
 	go rf.ticker()

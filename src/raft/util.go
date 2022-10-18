@@ -68,7 +68,7 @@ func (rf *Raft) flushLog(commitIndex int) {
 		//rf.logger.Printf(dCommit, fmt.Sprintf("向applyCh输入数据 %+v", item))
 		rf.applyIndex++
 	}
-	rf.persist()
+	//rf.persist()
 }
 
 //func (rf *Raft) binarySearch(start, end int) int {
