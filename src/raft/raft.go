@@ -124,6 +124,7 @@ func (rf *Raft) persist() {
 	data := w.Bytes()
 	//rf.persister.SaveRaftState(data)
 	rf.persister.SaveStateAndSnapshot(data, rf.snapshot)
+	rf.logger.Printf(dPersist, fmt.Sprintf("persist logsLength:%d", len(rf.logs)))
 }
 
 //
