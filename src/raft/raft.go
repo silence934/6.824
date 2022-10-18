@@ -348,6 +348,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.logUpdateLock = &sync.RWMutex{}
 	rf.voteLock = &sync.Mutex{}
+	rf.persistLock = &sync.Mutex{}
 	rf.commitLogLock = &sync.Mutex{}
 	rf.mu = &sync.Mutex{}
 
