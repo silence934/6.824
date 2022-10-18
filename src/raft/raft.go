@@ -200,6 +200,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	} else {
 		rf.logs = append([]LogEntry{{Term: rf.lastIncludedTerm, Index: index}}, rf.logs[rf.logIndex(index+1):]...)
 	}
+	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot index:%d  logLength:%d", index, len(rf.logs)))
 	rf.lastIncludedIndex = index
 	rf.persist()
 }
