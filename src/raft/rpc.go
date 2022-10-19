@@ -60,16 +60,19 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 			reply.LogTerm = log.Term
 			reply.LogIndex = reqIndex
 			//寻找这个term第一次出现的index
-			i := reqIndex - 1
+			i := reqIndex
 			for true {
-				o, l := rf.entry(i)
+				if i <= rf.lastIncludedIndex {
+					break
+				}
+				o, l := rf.entry(i - 1)
 				if o && l.Term == log.Term {
 					i--
 				} else {
 					break
 				}
 			}
-			reply.FirstIndex = i + 1
+			reply.FirstIndex = i
 		} else {
 			if reqIndex < rf.lastIncludedIndex {
 				reply.LogIndex = rf.lastIncludedIndex
@@ -80,16 +83,19 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 				reply.LogIndex = log.Index
 				reply.LogTerm = log.Term
 				//寻找这个term第一次出现的index
-				i := log.Index - 1
+				i := log.Index
 				for true {
-					o, l := rf.entry(i)
+					if i <= rf.lastIncludedIndex {
+						break
+					}
+					o, l := rf.entry(i - 1)
 					if o && l.Term == log.Term {
 						i--
 					} else {
 						break
 					}
 				}
-				reply.FirstIndex = i + 1
+				reply.FirstIndex = i
 			}
 		}
 
@@ -132,17 +138,14 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLogReply) {
 	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
 
+	rf.logUpdateLock.Lock()
+	defer rf.logUpdateLock.Unlock()
+
 	reply.Indexes = []*int{}
 	if !rf.isFollower() || req.Term < rf.term {
 		rf.logger.Printf(dLog, fmt.Sprintf("syncLog failed:%d %d %d", rf.role, rf.term, req.Term))
 		return
 	}
-	rf.logUpdateLock.Lock()
-	defer func() {
-		rf.logUpdateLock.Unlock()
-		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <-- %d receive=%d",
-			req.Logs[0].Index, len(req.Logs), req.Id, len(reply.Indexes)))
-	}()
 
 	rf.updateLastTime()
 
@@ -169,14 +172,17 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		reply.Indexes = append(reply.Indexes, &index)
 	}
 
-	ok2, log2 := rf.entry(lastLog.Index + 1)
-	if ok2 && lastLog.Term > log2.Term {
-		//去除多余的日志
-
-		rf.logs = rf.logs[:rf.logIndex(lastLog.Index+1)]
+	if lastLog.Index < rf.logLength()-1 {
+		ok2, log2 := rf.entry(lastLog.Index + 1)
+		if ok2 && lastLog.Term > log2.Term {
+			//去除多余的日志
+			rf.logs = rf.logs[:rf.logIndex(lastLog.Index+1)]
+		}
 	}
-	rf.persist()
 
+	rf.persist()
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <-- %d receive=%d",
+		req.Logs[0].Index, len(req.Logs), req.Id, len(reply.Indexes)))
 }
 
 func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {

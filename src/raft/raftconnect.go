@@ -97,7 +97,9 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	length := rf.logLength()
 
 	if length == startIndex {
-		//没有日志发送 尝试提交日志 可以解决并发问题导致没有提交的日志
+		//没有日志发送 尝试提交日志 可以解决并发或重启导致没有提交的日志
+		if startIndex-1 > commitIndex {
+		}
 		rf.sendLogSuccess(startIndex-1, server)
 		return
 	}

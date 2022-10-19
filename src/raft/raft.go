@@ -355,7 +355,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.applyCh = applyCh
 	rf.role = follower
-	rf.commitIndex = -1
+	rf.commitIndex = 0
 	rf.logs = []LogEntry{{Term: -1, Index: 0}}
 
 	rf.applyIndex = 0

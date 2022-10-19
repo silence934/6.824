@@ -6,10 +6,9 @@ import (
 )
 
 func (rf *Raft) getPeerIndex(server int) int {
-	rf.peerInfos[server].updateIndexLock.Lock()
-	defer rf.peerInfos[server].updateIndexLock.Unlock()
-	index := rf.peerInfos[server].index
-	return index
+	rf.peerInfos[server].updateIndexLock.RLock()
+	defer rf.peerInfos[server].updateIndexLock.RUnlock()
+	return rf.peerInfos[server].index
 }
 
 func (rf *Raft) updatePeerIndex(server, older, new int) bool {
