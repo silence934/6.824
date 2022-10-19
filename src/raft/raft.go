@@ -171,6 +171,9 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// Your code here (2D).
 	rf.logUpdateLock.Lock()
 	defer rf.logUpdateLock.Unlock()
+	//不可以和提交日志同时进行
+	rf.commitLogLock.Lock()
+	defer rf.commitLogLock.Unlock()
 	if lastIncludedIndex <= rf.lastIncludedIndex {
 		return false
 	}
