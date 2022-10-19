@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"6.824/labgob"
+	"bytes"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -76,7 +78,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		} else if log.Term == logTerm {
 			//日志匹配 发送logIndex之后的所有日志
 			if rf.updatePeerIndex(server, peerIndex, logIndex) {
-				rf.sendCoalesceSyncLog(logIndex+1, server)
+				rf.sendCoalesceSyncLog(logIndex+1, server, resp.CommitIndex)
 			}
 		} else if rf.updatePeerIndex(server, peerIndex, resp.FirstIndex-1) {
 			//日志不匹配  重新检测 不必等到下一次检测 可以提高日志同步速度
@@ -91,7 +93,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 	return false
 }
 
-func (rf *Raft) sendCoalesceSyncLog(startIndex, server int) {
+func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	length := rf.logLength()
 
 	if length == startIndex {
@@ -102,11 +104,20 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server int) {
 	//保证发送的第一个日志是对方期望的
 	peerIndex := rf.getPeerIndex(server)
 	ok, firstLog := rf.entry(startIndex)
-	if !ok || peerIndex+1 != firstLog.Index {
-		rf.logger.Printf(dError, fmt.Sprintf("ratf[%d] exp:%d ,first:%d", server, peerIndex+1, startIndex))
+	if !ok {
 		return
 	}
-	_, preLog := rf.entry(startIndex - 1)
+
+	if peerIndex+1 != firstLog.Index {
+		rf.logger.Printf(dError, fmt.Sprintf("sendCoalesceSyncLog failed,ratf[%d] exp:%d ,bug first:%d", server, peerIndex+1, startIndex))
+		return
+	}
+
+	ok, preLog := rf.entry(startIndex - 1)
+	if !ok {
+		return
+	}
+
 	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, Logs: []*RequestSyncLogArgs{{Index: firstLog.Index, Term: firstLog.Term, Command: firstLog.Command, PreLogTerm: preLog.Term}}}
 	preLog = firstLog
 
@@ -239,7 +250,15 @@ func (rf *Raft) sendInstallSnapshot(server int) bool {
 	rf.logUpdateLock.Unlock()
 	reply := InstallSnapshotReply{}
 
-	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d index:%d", server, rf.lastIncludedIndex))
+	//todo 待删除
+	r := bytes.NewBuffer(args.Data)
+	d := labgob.NewDecoder(r)
+	var commandIndex int
+	if d.Decode(&commandIndex) != nil {
+		rf.logger.Errorf("decode error")
+	}
+
+	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d index:%d snapshotIndex:%d", server, rf.lastIncludedIndex, commandIndex))
 	ok := rf.peers[server].Call("Raft.InstallSnapshot", &args, &reply)
 
 	return ok && reply.Accept

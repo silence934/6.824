@@ -111,6 +111,7 @@ func (rf *Raft) entry(index int) (b bool, l *LogEntry) {
 	}()
 	actualIndex := rf.logIndex(index)
 	if actualIndex < 0 || actualIndex >= len(rf.logs) {
+		rf.logger.Printf(dError, fmt.Sprintf("entry() out of range [%d] with capacity %d", index, rf.logLength()))
 		return false, nil
 	}
 	return true, &rf.logs[actualIndex]

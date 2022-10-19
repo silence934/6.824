@@ -221,7 +221,9 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 }
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
-
+	//不可以和提交日志同时进行
+	rf.commitLogLock.Lock()
+	defer rf.commitLogLock.Unlock()
 	if !rf.isFollower() || args.Term < rf.term || args.LastIncludedIndex <= rf.lastIncludedIndex {
 		rf.logger.Printf(dError, fmt.Sprintf("IS failed:%d %d %d", rf.role, rf.term, args.Term))
 		reply.Accept = false

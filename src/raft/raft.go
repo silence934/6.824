@@ -169,12 +169,11 @@ func (rf *Raft) readPersist(data []byte) {
 //
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	// Your code here (2D).
-	//lastIncludedIndex--
+	rf.logUpdateLock.Lock()
+	defer rf.logUpdateLock.Unlock()
 	if lastIncludedIndex <= rf.lastIncludedIndex {
 		return false
 	}
-	rf.logUpdateLock.Lock()
-	defer rf.logUpdateLock.Unlock()
 
 	rf.logger.Printf(dSnap, fmt.Sprintf("CondInstallSnapshot %d", lastIncludedIndex))
 	rf.commitIndex = lastIncludedIndex
