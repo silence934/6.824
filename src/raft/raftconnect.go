@@ -45,7 +45,7 @@ func (rf *Raft) sendRequestVote(server int) bool {
 	return ok
 }
 
-func (rf *Raft) sendHeartbeat(server int) bool {
+func (rf *Raft) sendHeartbeat(server, index int) bool {
 
 	if !rf.isLeader() {
 		return false
@@ -53,7 +53,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 
 	term := rf.term
 	peerIndex := rf.getPeerIndex(server)
-	req := RequestHeartbeatArgs{Id: rf.me, Term: term, Index: peerIndex}
+	req := RequestHeartbeatArgs{Id: rf.me, Term: term, Index: index}
 
 	resp := RequestHeartbeatReply{}
 
@@ -73,7 +73,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		if !ok {
 			//logIndex不在当前日志范围内
 			if rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) && rf.sendInstallSnapshot(server) {
-				rf.sendHeartbeat(server)
+				rf.sendHeartbeat(server, rf.lastIncludedIndex)
 			}
 		} else if log.Term == logTerm {
 			//日志匹配 发送logIndex之后的所有日志
@@ -82,7 +82,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 			}
 		} else if rf.updatePeerIndex(server, peerIndex, resp.FirstIndex-1) {
 			//日志不匹配  重新检测 不必等到下一次检测 可以提高日志同步速度
-			rf.sendHeartbeat(server)
+			rf.sendHeartbeat(server, resp.FirstIndex-1)
 			return true
 		}
 

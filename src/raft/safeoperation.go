@@ -50,7 +50,7 @@ func (rf *Raft) isFollower() bool {
 func (rf *Raft) initPeerInfos() bool {
 	if atomic.CompareAndSwapInt32(&rf.initPeers, 0, 1) {
 		defer func() { rf.initPeers = 0 }()
-		length := rf.logLength()
+		index := rf.lastIncludedIndex
 		if len(rf.peerInfos) == 0 {
 			rf.peerInfos = make([]*peerInfo, len(rf.peers))
 			for i := 0; i < len(rf.peerInfos); i++ {
@@ -64,7 +64,7 @@ func (rf *Raft) initPeerInfos() bool {
 			}
 		}
 		for _, d := range rf.peerInfos {
-			d.index = length - 1
+			d.index = index
 		}
 		return true
 	}

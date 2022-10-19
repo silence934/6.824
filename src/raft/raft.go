@@ -298,7 +298,7 @@ func (rf *Raft) heartbeatLoop() {
 		if rf.isLeader() {
 			for i := range rf.peers {
 				if i != rf.me {
-					go rf.sendHeartbeat(i)
+					go rf.sendHeartbeat(i, rf.logLength())
 				}
 			}
 		}
