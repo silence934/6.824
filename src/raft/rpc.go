@@ -182,17 +182,17 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 	atomic.AddInt32(&rf.SyncLogEntryCount, 1)
 
+	rf.logUpdateLock.Lock()
+	defer rf.logUpdateLock.Unlock()
+
 	reply.Accept = false
 
 	if !rf.isFollower() || req.Term < int(rf.term) {
 		rf.logger.Printf(dError, fmt.Sprintf("appendLog failed:%d %d %d", rf.role, rf.term, req.Term))
 		return
 	}
+
 	rf.updateLastTime()
-	defer func() {
-		rf.logger.Printf(dLog2, fmt.Sprintf("lt index=%d resp:%v <--", req.Index, reply.Accept))
-		rf.persist()
-	}()
 
 	index := req.Index
 	preTerm := req.PreLogTerm
@@ -207,8 +207,6 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		rf.logs = append(rf.logs, LogEntry{Index: index, Command: req.Command, Term: req.Term})
 		reply.Accept = true
 	} else {
-		rf.logUpdateLock.Lock()
-		defer rf.logUpdateLock.Unlock()
 		rf.logs[rf.logIndex(index)] = LogEntry{Index: index, Command: req.Command, Term: req.Term}
 		ok2, log2 := rf.entry(index + 1)
 		if ok2 && req.Term > log2.Term {
@@ -217,7 +215,8 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		}
 		reply.Accept = true
 	}
-
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt index=%d resp:%v <--", req.Index, reply.Accept))
+	rf.persist()
 }
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {

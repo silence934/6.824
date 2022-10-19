@@ -41,7 +41,7 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 	index := rf.logLength()
 	entry.Index = index
 	rf.logs = append(rf.logs, *entry)
-	go rf.persist()
+	rf.persist()
 
 	for i := range rf.peers {
 		if i != rf.me {
