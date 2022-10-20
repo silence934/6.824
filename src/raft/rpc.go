@@ -33,6 +33,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			} else {
 				reply.Accept = false
 			}
+			rf.logger.Printf(dLog, fmt.Sprintf("vote <-- [%d] %v", args.Id, reply))
 		}
 	}
 
@@ -180,9 +181,9 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		}
 	}
 
-	rf.persist()
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <-- %d receive=%d",
 		req.Logs[0].Index, len(req.Logs), req.Id, len(reply.Indexes)))
+	rf.persist()
 }
 
 func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
@@ -235,6 +236,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		return
 	}
 
+	rf.applyIndex = args.LastIncludedIndex
+	rf.commitIndex = args.LastIncludedIndex
 	rf.applyCh <- ApplyMsg{
 		CommandValid:  false,
 		SnapshotValid: true,
@@ -243,5 +246,5 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		SnapshotIndex: args.LastIncludedIndex,
 	}
 
-	rf.logger.Printf(dSnap, fmt.Sprintf("IS<--%d index:%d", args.Id, args.LastIncludedIndex))
+	rf.logger.Printf(dSnap, fmt.Sprintf("IS<--%d index:%d success", args.Id, args.LastIncludedIndex))
 }

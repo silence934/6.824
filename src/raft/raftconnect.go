@@ -26,18 +26,13 @@ func (rf *Raft) sendRequestVote(server int) bool {
 		return false
 	}
 
-	rf.logger.Printf(dLog, fmt.Sprintf("el --> [%d] %v", server, reply))
+	rf.logger.Printf(dLog, fmt.Sprintf("vote --> [%d] %v", server, reply))
 
 	if reply.Accept {
 		v := atomic.AddInt32(&rf.vote, 1)
 		if int(v) > len(rf.peers)/2 {
 			if rf.initPeerInfos() && rf.setRole(candidate, leader) {
 				rf.logger.Printf(dLog, fmt.Sprintf("==> leader"))
-				//for i, _ := range rf.peers {
-				//	if i != rf.me {
-				//		go rf.sendHeartbeat(i)
-				//	}
-				//}
 			}
 		}
 	}
@@ -61,18 +56,19 @@ func (rf *Raft) sendHeartbeat(server, index int) bool {
 	//startTime := time.Now()
 	ok := rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
 	if !ok {
+		//快速重试
 		ok = rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
 	}
 
 	if ok && resp.Accept && rf.isLeader() {
 		logIndex := resp.LogIndex
 		logTerm := resp.LogTerm
-		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v", server, resp))
 
 		ok, log := rf.entry(logIndex)
+		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v %v", server, resp, log))
 		if !ok {
 			//logIndex不在当前日志范围内
-			if rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) && rf.sendInstallSnapshot(server) {
+			if rf.sendInstallSnapshot(server) && rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) {
 				rf.sendHeartbeat(server, rf.lastIncludedIndex)
 			}
 		} else if log.Term == logTerm {
@@ -80,8 +76,9 @@ func (rf *Raft) sendHeartbeat(server, index int) bool {
 			if rf.updatePeerIndex(server, peerIndex, logIndex) {
 				rf.sendCoalesceSyncLog(logIndex+1, server, resp.CommitIndex)
 			}
-		} else if rf.updatePeerIndex(server, peerIndex, resp.FirstIndex-1) {
-			//日志不匹配  重新检测 不必等到下一次检测 可以提高日志同步速度
+		} else {
+			//if rf.updatePeerIndex(server, peerIndex, resp.FirstIndex-1)
+			//日志不匹配  重新检测 不必等到下一次心跳 可以提高日志同步速度
 			rf.sendHeartbeat(server, resp.FirstIndex-1)
 			return true
 		}
@@ -99,8 +96,8 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	if length == startIndex {
 		//没有日志发送 尝试提交日志 可以解决并发或重启导致没有提交的日志
 		if startIndex-1 > commitIndex {
+			rf.sendLogSuccess(startIndex-1, server)
 		}
-		rf.sendLogSuccess(startIndex-1, server)
 		return
 	}
 	//保证发送的第一个日志是对方期望的
@@ -148,6 +145,8 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 				rf.sendLogSuccess(*data, server)
 			}
 		}
+	} else {
+		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", peerIndex, rf.getPeerIndex(server)))
 	}
 }
 

@@ -52,7 +52,7 @@ type LogEntry struct {
 }
 
 func (t *LogEntry) String() string {
-	return fmt.Sprintf("{%d %v}", t.Index, t.Command)
+	return fmt.Sprintf("{%d %d %v}", t.Index, t.Term, t.Command)
 }
 
 type peerInfo struct {
@@ -168,23 +168,15 @@ func (rf *Raft) readPersist(data []byte) {
 // have more recent info since it communicate the snapshot on applyCh.
 //
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-	// Your code here (2D).
-	// Your code here (2D).
 	rf.logUpdateLock.Lock()
-	//不可以和提交日志同时进行
-	rf.commitLogLock.Lock()
-	defer func() {
-		rf.commitLogLock.Unlock()
-		rf.logUpdateLock.Unlock()
-	}()
+	defer rf.logUpdateLock.Unlock()
 
 	if lastIncludedIndex <= rf.lastIncludedIndex {
 		return false
 	}
 
 	rf.logger.Printf(dSnap, fmt.Sprintf("CondInstallSnapshot %d", lastIncludedIndex))
-	rf.commitIndex = lastIncludedIndex
-	rf.applyIndex = lastIncludedIndex
+
 	rf.snapshot = snapshot
 	rf.lastIncludedIndex = lastIncludedIndex
 	rf.lastIncludedTerm = lastIncludedTerm
@@ -298,7 +290,7 @@ func (rf *Raft) heartbeatLoop() {
 		if rf.isLeader() {
 			for i := range rf.peers {
 				if i != rf.me {
-					go rf.sendHeartbeat(i, rf.logLength())
+					go rf.sendHeartbeat(i, rf.logLength()-1)
 				}
 			}
 		}
