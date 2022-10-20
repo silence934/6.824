@@ -41,10 +41,10 @@ type RequestSyncLogReply struct {
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
-	Id          int
-	Term        int32
-	LogsLength  int
-	LastLogTerm int
+	Id           int
+	Term         int32
+	LastLogIndex int
+	LastLogTerm  int
 }
 
 //

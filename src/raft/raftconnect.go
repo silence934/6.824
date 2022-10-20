@@ -3,24 +3,27 @@ package raft
 import (
 	"fmt"
 	"sync/atomic"
-	"time"
 )
 
 func (rf *Raft) sendRequestVote(server int) bool {
 	log := rf.lastEntry()
 	args := RequestVoteArgs{
-		Id:          rf.me,
-		Term:        rf.term,
-		LogsLength:  log.Index + 1,
-		LastLogTerm: log.Term,
+		Id:           rf.me,
+		Term:         rf.term,
+		LastLogIndex: log.Index,
+		LastLogTerm:  log.Term,
 	}
 	//rf.logger.Printf(dLog, fmt.Sprintf("el --> [%d] ", server))
 
-	t := time.Now()
 	reply := RequestVoteReply{}
 	ok := rf.peers[server].Call("Raft.RequestVote", &args, &reply)
+	if !ok && rf.term == args.Term {
+		//快速重试
+		ok = rf.peers[server].Call("Raft.RequestVote", &args, &reply)
+	}
 
-	if time.Now().Sub(t).Milliseconds() > 150 {
+	if rf.term != args.Term {
+		//已经不是本轮选举了
 		return false
 	}
 
@@ -93,7 +96,7 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 
 	if length == startIndex {
 		//没有日志发送 尝试提交日志 可以解决并发或重启导致没有提交的日志
-		rf.sendLogSuccess(startIndex-1, server, commitIndex)
+		rf.sendLogSuccess(startIndex-1, server, -1)
 		return
 	}
 	//保证发送的第一个日志是对方期望的

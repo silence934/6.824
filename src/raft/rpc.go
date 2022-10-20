@@ -33,7 +33,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			} else {
 				reply.Accept = false
 			}
-			rf.logger.Printf(dLog, fmt.Sprintf("vote <-- [%d] %v", args.Id, reply))
+			rf.logger.Printf(dLog, fmt.Sprintf("vote <-- [%d] %v", args.Id, *reply))
 		}
 	}
 

@@ -15,22 +15,14 @@ func commandToString(command interface{}) string {
 }
 
 func (rf *Raft) acceptVote(args *RequestVoteArgs) bool {
-	length := rf.logLength()
-
-	if length == 0 {
-		return true
-	}
 
 	lastLog := rf.lastEntry()
 
-	if lastLog.Term < args.LastLogTerm {
-		return true
-	} else if lastLog.Term > args.LastLogTerm {
-		return false
+	if lastLog.Term == args.LastLogTerm {
+		return args.LastLogIndex >= lastLog.Index
 	} else {
-		return args.LogsLength >= length
+		return args.LastLogTerm > lastLog.Term
 	}
-
 }
 
 func (rf *Raft) addLogEntry(entry *LogEntry) int {
@@ -117,8 +109,8 @@ func (rf *Raft) entry(index int) (b bool, l *LogEntry) {
 	return true, &rf.logs[actualIndex]
 }
 
-func (rf *Raft) lastEntry() *LogEntry {
-	return &rf.logs[len(rf.logs)-1]
+func (rf *Raft) lastEntry() LogEntry {
+	return rf.logs[len(rf.logs)-1]
 }
 
 func (rf *Raft) logIndex(realIndex int) int {
