@@ -129,6 +129,14 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 		preLog = log
 	}
 
+	//	todo 	尝试解决空指针问题
+	defer func(args *CoalesceSyncLogArgs) {
+		if err := recover(); err != nil {
+			rf.logger.Printf(dError, fmt.Sprintf("是空指针吗?%v", args))
+			panic(err)
+		}
+	}(&req)
+
 	reply := CoalesceSyncLogReply{}
 	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
 

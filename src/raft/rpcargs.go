@@ -27,7 +27,8 @@ type RequestSyncLogArgs struct {
 }
 
 func (t *RequestSyncLogArgs) String() string {
-	return fmt.Sprintf("{Index:%d}", t.Index)
+	//return fmt.Sprintf("{Index:%d}", t.Index)
+	return fmt.Sprintf("%+v", *t)
 }
 
 type RequestSyncLogReply struct {
