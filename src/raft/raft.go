@@ -287,8 +287,6 @@ func (rf *Raft) ticker() {
 }
 
 func (rf *Raft) heartbeatLoop() {
-	rf.heartbeat = time.NewTicker(150 * time.Millisecond)
-
 	for range rf.heartbeat.C {
 		//time.Sleep(150 * time.Millisecond)
 		//time.Tick()
@@ -356,6 +354,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persistLock = &sync.Mutex{}
 	rf.commitLogLock = &sync.Mutex{}
 	rf.mu = &sync.Mutex{}
+	rf.heartbeat = time.NewTicker(150 * time.Millisecond)
 
 	rf.applyCh = applyCh
 	rf.role = follower

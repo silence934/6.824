@@ -35,6 +35,7 @@ func (rf *Raft) sendRequestVote(server int) bool {
 		if int(v) > len(rf.peers)/2 {
 			if rf.initPeerInfos() && rf.setRole(candidate, leader) {
 				rf.logger.Printf(dLog, fmt.Sprintf("==> leader"))
+				//成为leader后立刻发送心跳
 				rf.heartbeat.Reset(0)
 				rf.heartbeat.Reset(150 * time.Millisecond)
 			}
