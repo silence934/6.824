@@ -332,7 +332,7 @@ func (rf *Raft) logBufferLoop() {
 					}
 
 					if args.CommitIndex != -1 {
-						rf.logger.Printf(dCommit, fmt.Sprintf("commit -->%d index:%d", server, args.CommitIndex))
+						rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d index:%d", server, args.CommitIndex))
 						go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
 					}
 				}(peer)

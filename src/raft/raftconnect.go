@@ -70,7 +70,7 @@ func (rf *Raft) sendHeartbeat(server, index int) bool {
 		logTerm := resp.LogTerm
 
 		ok, log := rf.entry(logIndex)
-		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v %v", server, resp, log))
+		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v %v", server, resp, log.String()))
 		if !ok {
 			//logIndex不在当前日志范围内
 			if rf.sendInstallSnapshot(server) && rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) {
@@ -100,7 +100,7 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 
 	if length == startIndex {
 		//没有日志发送 尝试提交日志 可以解决并发或重启导致没有提交的日志
-		rf.sendLogSuccess(startIndex-1, server, -1)
+		rf.sendLogSuccess(startIndex-1, server, commitIndex)
 		return
 	}
 	//保证发送的第一个日志是对方期望的
@@ -202,6 +202,8 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 	} else {
 		select {
 		case rf.peerInfos[server].commitChannel <- &args:
+			//todo 寻找不提交的问题
+			rf.logger.Printf(dCommit, fmt.Sprintf("commit to buffer[%d %d]", server, commitIndex))
 		default:
 		}
 	}
