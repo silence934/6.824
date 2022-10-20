@@ -52,7 +52,7 @@ type LogEntry struct {
 }
 
 func (t *LogEntry) String() string {
-	return fmt.Sprintf("{%d %d %v}", t.Index, t.Term, t.Command)
+	return fmt.Sprintf("{%d %d}", t.Index, t.Term)
 }
 
 type peerInfo struct {

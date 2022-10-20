@@ -1,8 +1,6 @@
 package raft
 
 import (
-	"6.824/labgob"
-	"bytes"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -95,9 +93,7 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 
 	if length == startIndex {
 		//没有日志发送 尝试提交日志 可以解决并发或重启导致没有提交的日志
-		if startIndex-1 > commitIndex {
-			rf.sendLogSuccess(startIndex-1, server)
-		}
+		rf.sendLogSuccess(startIndex-1, server, commitIndex)
 		return
 	}
 	//保证发送的第一个日志是对方期望的
@@ -133,16 +129,13 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	reply := CoalesceSyncLogReply{}
 	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
 
-	//todo 意义?
-	//rf.mu.Lock()
-	//defer rf.mu.Unlock()
 	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
 		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
 			req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
 
 		if ok && rf.isLeader() {
 			for _, data := range reply.Indexes {
-				rf.sendLogSuccess(*data, server)
+				rf.sendLogSuccess(*data, server, -1)
 			}
 		}
 	} else {
@@ -171,7 +164,7 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt index:%d -->%d %v", req.Index, server, reply.Accept))
 
 	if ok && reply.Accept && rf.updatePeerIndex(server, peerIndex, entry.Index) {
-		rf.sendLogSuccess(entry.Index, server)
+		rf.sendLogSuccess(entry.Index, server, -1)
 	}
 }
 
@@ -199,10 +192,12 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 	}
 }
 
-func (rf *Raft) sendLogSuccess(index, server int) {
+func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 	if rf.isLeader() {
 		if rf.commitIndex >= index {
-			rf.sendCommitLogToBuffer(index, server)
+			if index > commitIndex {
+				rf.sendCommitLogToBuffer(index, server)
+			}
 			return
 		}
 		ok, log := rf.entry(index)
@@ -232,7 +227,9 @@ func (rf *Raft) sendLogSuccess(index, server int) {
 				if rf.commitIndex < index {
 					rf.sendCommitLogToBuffer(index, rf.me)
 				}
-				rf.sendCommitLogToBuffer(index, server)
+				if index > commitIndex {
+					rf.sendCommitLogToBuffer(index, server)
+				}
 			}
 		}
 	}
@@ -251,15 +248,14 @@ func (rf *Raft) sendInstallSnapshot(server int) bool {
 	rf.logUpdateLock.Unlock()
 	reply := InstallSnapshotReply{}
 
-	//todo 待删除
-	r := bytes.NewBuffer(args.Data)
-	d := labgob.NewDecoder(r)
-	var commandIndex int
-	if d.Decode(&commandIndex) != nil {
-		rf.logger.Errorf("decode error")
-	}
+	//r := bytes.NewBuffer(args.Data)
+	//d := labgob.NewDecoder(r)
+	//var commandIndex int
+	//if d.Decode(&commandIndex) != nil {
+	//	rf.logger.Errorf("decode error")
+	//}
 
-	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d index:%d snapshotIndex:%d", server, rf.lastIncludedIndex, commandIndex))
+	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d index:%d ", server, rf.lastIncludedIndex))
 	ok := rf.peers[server].Call("Raft.InstallSnapshot", &args, &reply)
 
 	return ok && reply.Accept
