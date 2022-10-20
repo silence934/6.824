@@ -3,6 +3,7 @@ package raft
 import (
 	"fmt"
 	"sync/atomic"
+	"time"
 )
 
 func (rf *Raft) sendRequestVote(server int) bool {
@@ -34,6 +35,8 @@ func (rf *Raft) sendRequestVote(server int) bool {
 		if int(v) > len(rf.peers)/2 {
 			if rf.initPeerInfos() && rf.setRole(candidate, leader) {
 				rf.logger.Printf(dLog, fmt.Sprintf("==> leader"))
+				rf.heartbeat.Reset(0)
+				rf.heartbeat.Reset(150 * time.Millisecond)
 			}
 		}
 	}
@@ -53,7 +56,7 @@ func (rf *Raft) sendHeartbeat(server, index int) bool {
 
 	resp := RequestHeartbeatReply{}
 
-	//rf.logger.Infof("heartbeat--->%d", server)
+	rf.logger.Printf(dTimer, fmt.Sprintf("hb--->%d", server))
 	//startTime := time.Now()
 	ok := rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
 	if !ok {

@@ -102,7 +102,7 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 
 	} else {
 		reply.Accept = false
-		rf.logger.Printf(dLog, fmt.Sprintf("hb <-- id:%d term:%d false", args.Id, args.Term))
+		rf.logger.Printf(dTimer, fmt.Sprintf("hb <-- id:%d term:%d false", args.Id, args.Term))
 	}
 	//logger.Debugf("[heartbeat] [%d %d] -----> [%d %d]  resp:%v", args.Id, args.Term, rf.me, term, reply.Accept)
 

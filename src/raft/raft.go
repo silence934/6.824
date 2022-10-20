@@ -73,6 +73,7 @@ type Raft struct {
 	commitLogLock *sync.Mutex
 	persistLock   *sync.Mutex
 	logUpdateLock *sync.RWMutex
+	heartbeat     *time.Ticker
 
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
@@ -239,6 +240,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // should call killed() to check whether it should stop.
 //
 func (rf *Raft) Kill() {
+	rf.heartbeat.Stop()
 	atomic.StoreInt32(&rf.dead, 1)
 	rf.logger.Printf(dDrop, "raft node killed")
 	// Your code here, if desired.
@@ -285,8 +287,11 @@ func (rf *Raft) ticker() {
 }
 
 func (rf *Raft) heartbeatLoop() {
-	for rf.killed() == false {
-		time.Sleep(150 * time.Millisecond)
+	rf.heartbeat = time.NewTicker(150 * time.Millisecond)
+
+	for range rf.heartbeat.C {
+		//time.Sleep(150 * time.Millisecond)
+		//time.Tick()
 		if rf.isLeader() {
 			for i := range rf.peers {
 				if i != rf.me {
