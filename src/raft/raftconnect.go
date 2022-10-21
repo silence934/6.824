@@ -80,15 +80,15 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		ok, log := rf.entry(logIndex)
 		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v %v", server, resp.String(), log.String()))
 		if !ok {
-			rf.setPeerExpIndex(server, rf.lastIncludedIndex)
 			//logIndex不在当前日志范围内
 			if rf.sendInstallSnapshot(server) && rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) {
+				rf.setPeerExpIndex(server, rf.lastIncludedIndex)
 				rf.sendHeartbeat(server)
 			}
 		} else if log.Term == logTerm {
 			//日志匹配 发送logIndex之后的所有日志
-			rf.setPeerExpIndex(server, logIndex)
 			if rf.updatePeerIndex(server, peerIndex, logIndex) {
+				rf.setPeerExpIndex(server, logIndex)
 				rf.sendCoalesceSyncLog(logIndex+1, server, resp.CommitIndex)
 			}
 		} else {
@@ -226,6 +226,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 
 func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 	if rf.isLeader() {
+		rf.setPeerExpIndex(server, index)
 		if rf.commitIndex >= index {
 			if index > commitIndex {
 				rf.sendCommitLogToBuffer(index, server)
@@ -236,7 +237,7 @@ func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 		if !ok {
 			return
 		}
-		rf.setPeerExpIndex(server, index)
+
 		count := 1
 
 		for _, d := range rf.peerInfos {
