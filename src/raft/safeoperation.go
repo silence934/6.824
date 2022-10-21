@@ -59,6 +59,7 @@ func (rf *Raft) initPeerInfos() bool {
 		for _, d := range rf.peerInfos {
 			d.index = index
 			d.expIndex = int32(rf.logLength() - 1)
+			d.commitChannel = make(chan *CommitLogArgs, 20)
 		}
 		rf.startHeartbeatLoop()
 		return true
