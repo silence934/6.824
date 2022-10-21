@@ -154,10 +154,10 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	reply := CoalesceSyncLogReply{}
 	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
 
-	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
+		req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
 
-		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
-			req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
+	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
 
 		if ok && rf.isLeader() && len(reply.Indexes) > 0 {
 			rf.sendLogSuccess(*reply.Indexes[len(reply.Indexes)-1], server, -1)
@@ -207,18 +207,16 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 		return
 	}
 	args := CommitLogArgs{CommitIndex: commitIndex, CommitLogTerm: log.Term}
-	if server == -1 {
-		for _, peer := range rf.peerInfos {
-			select {
-			case peer.commitChannel <- &args:
-			default:
-			}
-		}
+	if server == rf.me {
+		args.Id = rf.me
+		args.Term = rf.term
+		rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d index:%d", server, args.CommitIndex))
+		go rf.CommitLog(&args, &CommitLogReply{})
 	} else {
 		select {
 		case rf.peerInfos[server].commitChannel <- &args:
 			//todo 寻找不提交的问题
-			rf.logger.Printf(dCommit, fmt.Sprintf("commit to buffer[%d %d]", server, commitIndex))
+			//rf.logger.Printf(dCommit, fmt.Sprintf("commit to buffer[%d %d]", server, commitIndex))
 		default:
 		}
 	}
@@ -226,6 +224,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 
 func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 	if rf.isLeader() {
+		rf.logger.Printf(dCommit, fmt.Sprintf("[%d]send log[%d] success", server, index))
 		rf.setPeerExpIndex(server, index)
 		if rf.commitIndex >= index {
 			if index > commitIndex {
