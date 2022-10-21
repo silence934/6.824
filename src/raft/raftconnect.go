@@ -49,9 +49,9 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 	}
 
 	term := rf.term
-	info := rf.peerInfos[server]
 	peerIndex := rf.getPeerIndex(server)
-	req := RequestHeartbeatArgs{Id: rf.me, Term: term, Index: info.expIndex}
+	peerExpIndex := rf.getPeerExpIndex(server)
+	req := RequestHeartbeatArgs{Id: rf.me, Term: term, Index: int(peerExpIndex)}
 
 	resp := RequestHeartbeatReply{}
 
@@ -66,11 +66,11 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 	d := time.Now().Sub(startTime)
 	if d > rf.heartbeatInterval {
 		rf.logger.Printf(dTimer, fmt.Sprintf("hb -->[%d] timeout  %v", server, d))
-		return false
+		//return false
 	}
 	if ok {
 		//每次heartbeat成功就延迟下次heartbeat到来时间
-		info.heartbeatTicker.Reset(rf.heartbeatInterval - d)
+		//rf.peerInfos[server].heartbeatTicker.Reset(rf.heartbeatInterval - d)
 	}
 
 	if ok && resp.Accept && rf.isLeader() {
@@ -82,19 +82,18 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		if !ok {
 			//logIndex不在当前日志范围内
 			if rf.sendInstallSnapshot(server) && rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) {
-				rf.setPeerExpIndex(server, rf.lastIncludedIndex)
 				rf.sendHeartbeat(server)
 			}
 		} else if log.Term == logTerm {
 			//日志匹配 发送logIndex之后的所有日志
 			if rf.updatePeerIndex(server, peerIndex, logIndex) {
-				rf.setPeerExpIndex(server, logIndex)
 				rf.sendCoalesceSyncLog(logIndex+1, server, resp.CommitIndex)
 			}
 		} else {
 			//日志不匹配  重新检测 不必等到下一次心跳 可以提高日志同步速度
-			rf.setPeerExpIndex(server, resp.FirstIndex-1)
-			rf.sendHeartbeat(server)
+			if rf.updatePeerExpIndex(server, peerExpIndex, int32(resp.FirstIndex-1)) {
+				rf.sendHeartbeat(server)
+			}
 			return true
 		}
 
@@ -158,7 +157,6 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 		req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
 
 	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
-
 		if ok && rf.isLeader() && len(reply.Indexes) > 0 {
 			rf.sendLogSuccess(*reply.Indexes[len(reply.Indexes)-1], server, -1)
 		}
@@ -216,7 +214,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 		select {
 		case rf.peerInfos[server].commitChannel <- &args:
 			//todo 寻找不提交的问题
-			//rf.logger.Printf(dCommit, fmt.Sprintf("commit to buffer[%d %d]", server, commitIndex))
+			rf.logger.Printf(dCommit, fmt.Sprintf("commit to buffer[%d %d]", server, commitIndex))
 		default:
 		}
 	}
@@ -224,8 +222,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 
 func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 	if rf.isLeader() {
-		rf.logger.Printf(dCommit, fmt.Sprintf("[%d]send log[%d] success", server, index))
-		rf.setPeerExpIndex(server, index)
+		rf.logger.Printf(dCommit, fmt.Sprintf("send log[%d %d] success", server, index))
 		if rf.commitIndex >= index {
 			if index > commitIndex {
 				rf.sendCommitLogToBuffer(index, server)

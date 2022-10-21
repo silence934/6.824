@@ -58,7 +58,7 @@ func (t *LogEntry) String() string {
 type peerInfo struct {
 	serverId        int
 	index           int //对方和自己相同的日志下标
-	expIndex        int
+	expIndex        int32
 	updateIndexLock *sync.RWMutex
 	//channel         chan RequestSyncLogArgs //日志同步缓存channel
 	commitChannel   chan *CommitLogArgs //日志提交缓存
@@ -349,7 +349,12 @@ func (rf *Raft) logBufferLoop() {
 
 					if args.CommitIndex != -1 {
 						rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d index:%d", server, args.CommitIndex))
-						go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
+						go func(serverId int, args *CommitLogArgs) {
+							if !rf.peers[serverId].Call("Raft.CommitLog", args, &CommitLogReply{}) {
+								//快速重试
+								rf.peers[serverId].Call("Raft.CommitLog", args, &CommitLogReply{})
+							}
+						}(server, &args)
 					}
 				}(peer)
 			}

@@ -4,8 +4,12 @@ import (
 	"sync/atomic"
 )
 
-func (rf *Raft) setPeerExpIndex(server, index int) {
-	rf.peerInfos[server].expIndex = index
+func (rf *Raft) updatePeerExpIndex(server int, older, new int32) bool {
+	return atomic.CompareAndSwapInt32(&rf.peerInfos[server].expIndex, older, new)
+}
+
+func (rf *Raft) getPeerExpIndex(server int) int32 {
+	return atomic.LoadInt32(&rf.peerInfos[server].expIndex)
 }
 
 func (rf *Raft) getPeerIndex(server int) int {
@@ -20,6 +24,7 @@ func (rf *Raft) updatePeerIndex(server, older, new int) bool {
 	peer := rf.peerInfos[server]
 	if peer.index == older {
 		peer.index = new
+		rf.peerInfos[server].expIndex = int32(new)
 		return true
 	}
 	return false
@@ -53,7 +58,7 @@ func (rf *Raft) initPeerInfos() bool {
 		index := rf.lastIncludedIndex
 		for _, d := range rf.peerInfos {
 			d.index = index
-			d.expIndex = rf.logLength() - 1
+			d.expIndex = int32(rf.logLength() - 1)
 		}
 		rf.startHeartbeatLoop()
 		return true
