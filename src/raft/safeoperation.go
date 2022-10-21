@@ -4,6 +4,10 @@ import (
 	"sync/atomic"
 )
 
+func (rf *Raft) setPeerExpIndex(server, index int) {
+	rf.peerInfos[server].expIndex = index
+}
+
 func (rf *Raft) getPeerIndex(server int) int {
 	rf.peerInfos[server].updateIndexLock.RLock()
 	defer rf.peerInfos[server].updateIndexLock.RUnlock()

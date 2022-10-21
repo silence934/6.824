@@ -174,10 +174,24 @@ func TestRPCBytes2B(t *testing.T) {
 	bytes1 := cfg.bytesTotal()
 	got := bytes1 - bytes0
 	expected := int64(servers) * sent
+
+	RequestVoteCount := int32(0)
+	HeartbeatCount := int32(0)
+	CommitLogCount := int32(0)
+	SyncLogEntryCount := int32(0)
+	for _, r := range cfg.rafts {
+		RequestVoteCount += r.RequestVoteCount
+		HeartbeatCount += r.HeartbeatCount
+		CommitLogCount += r.CommitLogCount
+		SyncLogEntryCount += r.SyncLogEntryCount
+	}
+
+	fmt.Printf("got:%d\n", got)
+	fmt.Printf("%d  %d  %d  %d\n", RequestVoteCount, HeartbeatCount, CommitLogCount, SyncLogEntryCount)
+
 	if got > expected+50000 {
 		t.Fatalf("too many RPC bytes; got %v, expected %v", got, expected)
 	}
-
 	cfg.end()
 }
 

@@ -3,7 +3,6 @@ package raft
 import (
 	"fmt"
 	"sync/atomic"
-	"time"
 )
 
 //
@@ -47,7 +46,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatReply) {
 	atomic.AddInt32(&rf.HeartbeatCount, 1)
 	term := rf.term
-	reply.RespTime = time.Now().UnixMilli()
+	//reply.RespTime = time.Now().UnixMilli()
 	if term <= args.Term {
 		rf.updateLastTime()
 		rf.role = follower

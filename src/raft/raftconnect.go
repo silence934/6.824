@@ -55,6 +55,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 
 	resp := RequestHeartbeatReply{}
 
+	startTime := time.Now()
 	rf.logger.Printf(dTimer, fmt.Sprintf("hb--->%d %v", server, req.Index))
 	ok := rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
 	if !ok {
@@ -62,7 +63,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		ok = rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
 	}
 
-	d := time.Now().Sub(time.UnixMilli(resp.RespTime))
+	d := time.Now().Sub(startTime)
 	if d > rf.heartbeatInterval {
 		rf.logger.Printf(dTimer, fmt.Sprintf("hb -->[%d] timeout  %v", server, d))
 		return false
@@ -79,20 +80,20 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		ok, log := rf.entry(logIndex)
 		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v %v", server, resp.String(), log.String()))
 		if !ok {
-			info.expIndex = rf.lastIncludedIndex
+			rf.setPeerExpIndex(server, rf.lastIncludedIndex)
 			//logIndex不在当前日志范围内
 			if rf.sendInstallSnapshot(server) && rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) {
 				rf.sendHeartbeat(server)
 			}
 		} else if log.Term == logTerm {
 			//日志匹配 发送logIndex之后的所有日志
-			info.expIndex = logIndex
+			rf.setPeerExpIndex(server, logIndex)
 			if rf.updatePeerIndex(server, peerIndex, logIndex) {
 				rf.sendCoalesceSyncLog(logIndex+1, server, resp.CommitIndex)
 			}
 		} else {
 			//日志不匹配  重新检测 不必等到下一次心跳 可以提高日志同步速度
-			info.expIndex = resp.FirstIndex - 1
+			rf.setPeerExpIndex(server, resp.FirstIndex-1)
 			rf.sendHeartbeat(server)
 			return true
 		}
@@ -154,7 +155,6 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
 
 	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
-		rf.peerInfos[server].expIndex = peerIndex + len(reply.Indexes)
 
 		rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
 			req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
@@ -162,6 +162,12 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 		if ok && rf.isLeader() && len(reply.Indexes) > 0 {
 			rf.sendLogSuccess(*reply.Indexes[len(reply.Indexes)-1], server, -1)
 		}
+		//if ok && rf.isLeader() {
+		//	for _, data := range reply.Indexes {
+		//		rf.sendLogSuccess(*data, server, -1)
+		//	}
+		//}
+
 	} else {
 		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", peerIndex, rf.getPeerIndex(server)))
 	}
@@ -230,7 +236,7 @@ func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 		if !ok {
 			return
 		}
-
+		rf.setPeerExpIndex(server, index)
 		count := 1
 
 		for _, d := range rf.peerInfos {
