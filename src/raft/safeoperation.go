@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"sync"
 	"sync/atomic"
 )
 
@@ -51,22 +50,25 @@ func (rf *Raft) initPeerInfos() bool {
 	if atomic.CompareAndSwapInt32(&rf.initPeers, 0, 1) {
 		defer func() { rf.initPeers = 0 }()
 		index := rf.lastIncludedIndex
-		if len(rf.peerInfos) == 0 {
-			rf.peerInfos = make([]*peerInfo, len(rf.peers))
-			for i := 0; i < len(rf.peerInfos); i++ {
-				rf.peerInfos[i] = &peerInfo{
-					serverId:        i,
-					index:           rf.logLength() - 1,
-					updateIndexLock: &sync.RWMutex{},
-					channel:         make(chan RequestSyncLogArgs, 20),
-					commitChannel:   make(chan *CommitLogArgs, 20),
-				}
-			}
-		}
 		for _, d := range rf.peerInfos {
 			d.index = index
 		}
+		rf.startHeartbeatLoop()
 		return true
 	}
 	return false
+}
+
+func (rf *Raft) stopHeartbeatLoop() {
+	for _, peer := range rf.peerInfos {
+		peer.heartbeatTicker.Stop()
+	}
+}
+
+func (rf *Raft) startHeartbeatLoop() {
+	for _, peer := range rf.peerInfos {
+		//第一次立刻发送心跳
+		peer.heartbeatTicker.Reset(0)
+		peer.heartbeatTicker.Reset(rf.heartbeatInterval)
+	}
 }

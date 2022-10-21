@@ -29,6 +29,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.setTerm(term)
 			if rf.acceptVote(args) {
 				rf.updateLastTime()
+				rf.stopHeartbeatLoop()
 				reply.Accept = true
 			} else {
 				reply.Accept = false

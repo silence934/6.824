@@ -59,8 +59,9 @@ type peerInfo struct {
 	serverId        int
 	index           int //对方和自己相同的日志下标
 	updateIndexLock *sync.RWMutex
-	channel         chan RequestSyncLogArgs //日志同步缓存channel
-	commitChannel   chan *CommitLogArgs     //日志提交缓存
+	//channel         chan RequestSyncLogArgs //日志同步缓存channel
+	commitChannel   chan *CommitLogArgs //日志提交缓存
+	heartbeatTicker *time.Ticker
 }
 
 //
@@ -75,10 +76,11 @@ type Raft struct {
 	logUpdateLock *sync.RWMutex
 	heartbeat     *time.Ticker
 
-	peers     []*labrpc.ClientEnd // RPC end points of all peers
-	persister *Persister          // Object to hold this peer's persisted state
-	dead      int32               // set by Kill()
-	logger    Log
+	peers             []*labrpc.ClientEnd // RPC end points of all peers
+	persister         *Persister          // Object to hold this peer's persisted state
+	dead              int32               // set by Kill()
+	logger            Log
+	heartbeatInterval time.Duration
 
 	me         int // this peer's Index into peers[]
 	applyIndex int //刷入applyCh的下标
@@ -240,8 +242,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // should call killed() to check whether it should stop.
 //
 func (rf *Raft) Kill() {
-	rf.heartbeat.Stop()
 	atomic.StoreInt32(&rf.dead, 1)
+	rf.stopHeartbeatLoop()
 	rf.logger.Printf(dDrop, "raft node killed")
 	// Your code here, if desired.
 }
@@ -287,17 +289,30 @@ func (rf *Raft) ticker() {
 }
 
 func (rf *Raft) heartbeatLoop() {
-	for range rf.heartbeat.C {
-		//time.Sleep(150 * time.Millisecond)
-		//time.Tick()
-		if rf.isLeader() {
-			for i := range rf.peers {
-				if i != rf.me {
-					go rf.sendHeartbeat(i, rf.logLength()-1)
+
+	for _, data := range rf.peerInfos {
+		if data.serverId != rf.me {
+			go func(info *peerInfo) {
+				for range info.heartbeatTicker.C {
+					go func(server int) {
+						rf.sendHeartbeat(server, rf.logLength()-1)
+					}(info.serverId)
 				}
-			}
+			}(data)
 		}
 	}
+
+	//for range rf.heartbeat.C {
+	//	//time.Sleep(150 * time.Millisecond)
+	//	//time.Tick()
+	//	if rf.isLeader() {
+	//		for i := range rf.peers {
+	//			if i != rf.me {
+	//				go rf.sendHeartbeat(i, rf.logLength()-1)
+	//			}
+	//		}
+	//	}
+	//}
 }
 
 func (rf *Raft) logBufferLoop() {
@@ -354,7 +369,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persistLock = &sync.Mutex{}
 	rf.commitLogLock = &sync.Mutex{}
 	rf.mu = &sync.Mutex{}
-	rf.heartbeat = time.NewTicker(150 * time.Millisecond)
+	rf.heartbeatInterval = 150 * time.Millisecond
 
 	rf.applyCh = applyCh
 	rf.role = follower
@@ -367,10 +382,20 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.logger = MakeLogger(rf)
 	rf.logger.Printf(dDrop, "raft node start")
 
-	rf.readPersist(persister.ReadRaftState())
-	//rf.persist()
+	rf.peerInfos = make([]*peerInfo, len(rf.peers))
+	for i := 0; i < len(rf.peerInfos); i++ {
+		rf.peerInfos[i] = &peerInfo{
+			serverId:        i,
+			updateIndexLock: &sync.RWMutex{},
+			//channel:         make(chan RequestSyncLogArgs, 20),
+			commitChannel:   make(chan *CommitLogArgs, 20),
+			heartbeatTicker: time.NewTicker(rf.heartbeatInterval),
+		}
+	}
+	rf.stopHeartbeatLoop()
 
-	// start ticker goroutine to start elections
+	rf.readPersist(persister.ReadRaftState())
+
 	go rf.ticker()
 	go rf.heartbeatLoop()
 	go rf.logBufferLoop()
