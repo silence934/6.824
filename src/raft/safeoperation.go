@@ -16,7 +16,6 @@ func (rf *Raft) updatePeerIndex(server, older, new int) bool {
 	peer := rf.peerInfos[server]
 	if peer.index == older {
 		peer.index = new
-		//logger.Infof("raft[%d] 修改 peer[%d].index  %d->%d  %d", rf.me, server, older, new, rf.peerInfos[server].index)
 		return true
 	}
 	return false
@@ -25,9 +24,7 @@ func (rf *Raft) updatePeerIndex(server, older, new int) bool {
 func (rf *Raft) setPeerIndex(server, index int) {
 	rf.peerInfos[server].updateIndexLock.Lock()
 	defer rf.peerInfos[server].updateIndexLock.Unlock()
-	//older := rf.peerInfos[server].index
 	rf.peerInfos[server].index = index
-	//logger.Infof("raft[%d] 修改 peer[%d].index  %d->%d  %d", rf.me, server, older, index, rf.peerInfos[server].index)
 }
 
 func (rf *Raft) getRole() int32 {
@@ -47,11 +44,12 @@ func (rf *Raft) isFollower() bool {
 }
 
 func (rf *Raft) initPeerInfos() bool {
-	if atomic.CompareAndSwapInt32(&rf.initPeers, 0, 1) {
+	if rf.role == candidate && atomic.CompareAndSwapInt32(&rf.initPeers, 0, 1) {
 		defer func() { rf.initPeers = 0 }()
 		index := rf.lastIncludedIndex
 		for _, d := range rf.peerInfos {
 			d.index = index
+			d.expIndex = rf.logLength() - 1
 		}
 		rf.startHeartbeatLoop()
 		return true

@@ -58,6 +58,7 @@ func (t *LogEntry) String() string {
 type peerInfo struct {
 	serverId        int
 	index           int //对方和自己相同的日志下标
+	expIndex        int
 	updateIndexLock *sync.RWMutex
 	//channel         chan RequestSyncLogArgs //日志同步缓存channel
 	commitChannel   chan *CommitLogArgs //日志提交缓存
@@ -295,7 +296,7 @@ func (rf *Raft) heartbeatLoop() {
 			go func(info *peerInfo) {
 				for range info.heartbeatTicker.C {
 					go func(server int) {
-						rf.sendHeartbeat(server, rf.logLength()-1)
+						rf.sendHeartbeat(server)
 					}(info.serverId)
 				}
 			}(data)

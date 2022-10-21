@@ -1,6 +1,8 @@
 package raft
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type RequestHeartbeatArgs struct {
 	// Your data here (2A, 2B).
@@ -16,6 +18,11 @@ type RequestHeartbeatReply struct {
 	LogIndex    int
 	LogTerm     int
 	CommitIndex int
+	RespTime    int64
+}
+
+func (r *RequestHeartbeatReply) String() string {
+	return fmt.Sprintf("{%d %d %d %d}", r.FirstIndex, r.LogIndex, r.LogTerm, r.CommitIndex)
 }
 
 type RequestSyncLogArgs struct {
