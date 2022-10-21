@@ -348,11 +348,15 @@ func (rf *Raft) logBufferLoop() {
 					}
 
 					if args.CommitIndex != -1 {
-						rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d index:%d", server, args.CommitIndex))
 						go func(serverId int, args *CommitLogArgs) {
-							if !rf.peers[serverId].Call("Raft.CommitLog", args, &CommitLogReply{}) {
+							rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d index:%d", serverId, args.CommitIndex))
+							ok := rf.peers[serverId].Call("Raft.CommitLog", args, &CommitLogReply{})
+							if !ok {
 								//快速重试
-								rf.peers[serverId].Call("Raft.CommitLog", args, &CommitLogReply{})
+								ok = rf.peers[serverId].Call("Raft.CommitLog", args, &CommitLogReply{})
+							}
+							if !ok {
+								rf.logger.Printf(dTimer, fmt.Sprintf("send commit -->%d index:%d fail", serverId, args.CommitIndex))
 							}
 						}(server, &args)
 					}
