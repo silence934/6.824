@@ -143,8 +143,8 @@ func (rf *Raft) updateLastTime() {
 
 func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, CoalesceSyncLogArgs) {
 
-	rf.logUpdateLock.Lock()
-	defer rf.logUpdateLock.Unlock()
+	rf.logUpdateLock.RLock()
+	defer rf.logUpdateLock.RUnlock()
 
 	//保证发送的第一个日志是对方期望的
 	peerIndex := rf.getPeerIndex(server)
@@ -168,8 +168,8 @@ func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, CoalesceSyncL
 
 	length := rf.logLength()
 	for i := startIndex + 1; i < length; i++ {
-		ok, log := rf.entry(i)
-		if ok {
+		t, log := rf.entry(i)
+		if t {
 			req.Logs = append(req.Logs, &RequestSyncLogArgs{Index: log.Index, Term: log.Term, Command: log.Command, PreLogTerm: preLog.Term})
 		} else {
 			return false, CoalesceSyncLogArgs{}

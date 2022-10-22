@@ -130,19 +130,13 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
 
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
-		req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
+		startIndex, len(req.Logs), server, ok, len(reply.Indexes)))
 
 	peerIndex := rf.getPeerIndex(server)
 	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
 		if ok && rf.isLeader() && len(reply.Indexes) > 0 {
 			rf.sendLogSuccess(*reply.Indexes[len(reply.Indexes)-1], server, -1)
 		}
-		//if ok && rf.isLeader() {
-		//	for _, data := range reply.Indexes {
-		//		rf.sendLogSuccess(*data, server, -1)
-		//	}
-		//}
-
 	} else {
 		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", peerIndex, rf.getPeerIndex(server)))
 	}
