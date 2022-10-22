@@ -125,9 +125,9 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 			rf.logger.Printf(dError, fmt.Sprintf("是空指针吗?%v", args))
 			panic(err)
 		}
-	}(req)
+	}(&req)
 
-	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", req, &reply)
+	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
 
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
 		req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))

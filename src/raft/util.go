@@ -141,7 +141,7 @@ func (rf *Raft) updateLastTime() {
 	rf.lastCallTime = time.Now()
 }
 
-func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSyncLogArgs) {
+func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, CoalesceSyncLogArgs) {
 
 	rf.logUpdateLock.Lock()
 	defer rf.logUpdateLock.Unlock()
@@ -150,17 +150,17 @@ func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSync
 	peerIndex := rf.getPeerIndex(server)
 	ok, firstLog := rf.entry(startIndex)
 	if !ok {
-		return false, nil
+		return false, CoalesceSyncLogArgs{}
 	}
 
 	if peerIndex+1 != firstLog.Index {
 		rf.logger.Printf(dError, fmt.Sprintf("sendCoalesceSyncLog failed,ratf[%d] exp:%d ,bug first:%d", server, peerIndex+1, startIndex))
-		return false, nil
+		return false, CoalesceSyncLogArgs{}
 	}
 
 	ok, preLog := rf.entry(startIndex - 1)
 	if !ok {
-		return false, nil
+		return false, CoalesceSyncLogArgs{}
 	}
 
 	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, Logs: []*RequestSyncLogArgs{{Index: firstLog.Index, Term: firstLog.Term, Command: firstLog.Command, PreLogTerm: preLog.Term}}}
@@ -172,10 +172,10 @@ func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSync
 		if ok {
 			req.Logs = append(req.Logs, &RequestSyncLogArgs{Index: log.Index, Term: log.Term, Command: log.Command, PreLogTerm: preLog.Term})
 		} else {
-			return false, nil
+			return false, CoalesceSyncLogArgs{}
 		}
 		preLog = log
 	}
 
-	return true, &req
+	return true, req
 }

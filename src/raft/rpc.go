@@ -34,9 +34,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			} else {
 				reply.Accept = false
 			}
-			rf.logger.Printf(dLog, fmt.Sprintf("vote <-- [%d] %v", args.Id, *reply))
 		}
 	}
+	rf.logger.Printf(dLog, fmt.Sprintf("vote <-- [%d] %v", args.Id, *reply))
 
 	//logger.Infof("raft[%d  %d]收到投票请求对方[%d]的term:%d 结果=%v,CommitIndex:%d,我的term:%d CommitIndex:%d", rf.me, rf.role, args.Id, args.Term, reply.Accept, args.CommitIndex, rf.Term, rf.commitIndex)
 	//logger.Debugf("raft[%d %d]收到投票请求[%d]  结果=%v", rf.me, role, args.Id, reply.Accept)
@@ -197,7 +197,7 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 	reply.Accept = false
 
 	if !rf.isFollower() || req.Term < int(rf.term) {
-		rf.logger.Printf(dError, fmt.Sprintf("appendLog failed:%d %d %d", rf.role, rf.term, req.Term))
+		rf.logger.Printf(dError, fmt.Sprintf("appendLog failed:%d %d", rf.role, req.Term))
 		return
 	}
 
