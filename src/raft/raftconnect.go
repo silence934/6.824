@@ -115,6 +115,9 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 
 	reply := CoalesceSyncLogReply{}
 	ok, req := rf.generateCoalesceLog(startIndex, server)
+	if !ok {
+		return
+	}
 
 	//	todo 	尝试解决空指针问题
 	defer func(args *CoalesceSyncLogArgs) {
