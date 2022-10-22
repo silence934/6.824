@@ -17,11 +17,7 @@ func (rf *Raft) sendRequestVote(server int) bool {
 	//rf.logger.Printf(dLog, fmt.Sprintf("el --> [%d] ", server))
 
 	reply := RequestVoteReply{}
-	ok := rf.peers[server].Call("Raft.RequestVote", &args, &reply)
-	if !ok && rf.term == args.Term {
-		//快速重试
-		ok = rf.peers[server].Call("Raft.RequestVote", &args, &reply)
-	}
+	ok := rf.call(server, "Raft.RequestVote", &args, &reply)
 
 	if rf.term != args.Term {
 		//已经不是本轮选举了
@@ -57,11 +53,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 
 	startTime := time.Now()
 	rf.logger.Printf(dTimer, fmt.Sprintf("hb--->%d %v", server, req.Index))
-	ok := rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
-	if !ok {
-		//快速重试
-		ok = rf.peers[server].Call("Raft.Heartbeat", &req, &resp)
-	}
+	ok := rf.call(server, "Raft.Heartbeat", &req, &resp)
 
 	d := time.Now().Sub(startTime)
 	if d > rf.heartbeatInterval {
@@ -157,7 +149,7 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	}(&req)
 
 	reply := CoalesceSyncLogReply{}
-	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
+	ok = rf.call(server, "Raft.CoalesceSyncLog", &req, &reply)
 
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
 		req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
@@ -185,7 +177,7 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 	}
 	req := RequestSyncLogArgs{PreLogTerm: pre.Term, Index: entry.Index, Term: entry.Term, Command: entry.Command}
 	reply := RequestSyncLogReply{}
-	ok := rf.peers[server].Call("Raft.AppendLog", &req, &reply)
+	ok := rf.call(server, "Raft.AppendLog", &req, &reply)
 
 	//rf.mu.Lock()
 	//defer rf.mu.Unlock()
@@ -242,6 +234,7 @@ func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 			}
 		}
 		mid := (len(rf.peers) >> 1) + 1
+		//只提交自己term内的日志
 		if log.Term == int(rf.term) {
 			if count == mid {
 				//第一次到达一半的时候，向之前同步完成的节点发送提交请求
@@ -285,7 +278,7 @@ func (rf *Raft) sendInstallSnapshot(server int) bool {
 	//}
 
 	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d index:%d ", server, rf.lastIncludedIndex))
-	ok := rf.peers[server].Call("Raft.InstallSnapshot", &args, &reply)
+	ok := rf.call(server, "Raft.InstallSnapshot", &args, &reply)
 
 	return ok && reply.Accept
 }

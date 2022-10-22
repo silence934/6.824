@@ -80,3 +80,12 @@ func (rf *Raft) startHeartbeatLoop() {
 		peer.heartbeatTicker.Reset(rf.heartbeatInterval)
 	}
 }
+
+func (rf *Raft) call(server int, svcMeth string, args interface{}, reply interface{}) bool {
+	for i := 0; i < 2; i++ {
+		if rf.peers[server].Call(svcMeth, args, reply) {
+			return true
+		}
+	}
+	return false
+}
