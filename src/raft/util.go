@@ -140,3 +140,42 @@ func (rf *Raft) lastTime() time.Time {
 func (rf *Raft) updateLastTime() {
 	rf.lastCallTime = time.Now()
 }
+
+func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSyncLogArgs) {
+
+	rf.logUpdateLock.Lock()
+	defer rf.logUpdateLock.Unlock()
+
+	//保证发送的第一个日志是对方期望的
+	peerIndex := rf.getPeerIndex(server)
+	ok, firstLog := rf.entry(startIndex)
+	if !ok {
+		return false, nil
+	}
+
+	if peerIndex+1 != firstLog.Index {
+		rf.logger.Printf(dError, fmt.Sprintf("sendCoalesceSyncLog failed,ratf[%d] exp:%d ,bug first:%d", server, peerIndex+1, startIndex))
+		return false, nil
+	}
+
+	ok, preLog := rf.entry(startIndex - 1)
+	if !ok {
+		return false, nil
+	}
+
+	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, Logs: []*RequestSyncLogArgs{{Index: firstLog.Index, Term: firstLog.Term, Command: firstLog.Command, PreLogTerm: preLog.Term}}}
+	preLog = firstLog
+
+	length := rf.logLength()
+	for i := startIndex + 1; i < length; i++ {
+		ok, log := rf.entry(i)
+		if ok {
+			req.Logs = append(req.Logs, &RequestSyncLogArgs{Index: log.Index, Term: log.Term, Command: log.Command, PreLogTerm: preLog.Term})
+		} else {
+			return false, nil
+		}
+		preLog = log
+	}
+
+	return true, &req
+}

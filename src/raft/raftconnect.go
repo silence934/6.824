@@ -112,35 +112,9 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 		rf.sendLogSuccess(startIndex-1, server, commitIndex)
 		return
 	}
-	//保证发送的第一个日志是对方期望的
-	peerIndex := rf.getPeerIndex(server)
-	ok, firstLog := rf.entry(startIndex)
-	if !ok {
-		return
-	}
 
-	if peerIndex+1 != firstLog.Index {
-		rf.logger.Printf(dError, fmt.Sprintf("sendCoalesceSyncLog failed,ratf[%d] exp:%d ,bug first:%d", server, peerIndex+1, startIndex))
-		return
-	}
-
-	ok, preLog := rf.entry(startIndex - 1)
-	if !ok {
-		return
-	}
-
-	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, Logs: []*RequestSyncLogArgs{{Index: firstLog.Index, Term: firstLog.Term, Command: firstLog.Command, PreLogTerm: preLog.Term}}}
-	preLog = firstLog
-
-	for i := startIndex + 1; i < length; i++ {
-		ok, log := rf.entry(i)
-		if ok {
-			req.Logs = append(req.Logs, &RequestSyncLogArgs{Index: log.Index, Term: log.Term, Command: log.Command, PreLogTerm: preLog.Term})
-		} else {
-			return
-		}
-		preLog = log
-	}
+	reply := CoalesceSyncLogReply{}
+	ok, req := rf.generateCoalesceLog(startIndex, server)
 
 	//	todo 	尝试解决空指针问题
 	defer func(args *CoalesceSyncLogArgs) {
@@ -148,14 +122,14 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 			rf.logger.Printf(dError, fmt.Sprintf("是空指针吗?%v", args))
 			panic(err)
 		}
-	}(&req)
+	}(req)
 
-	reply := CoalesceSyncLogReply{}
-	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", &req, &reply)
+	ok = rf.peers[server].Call("Raft.CoalesceSyncLog", req, &reply)
 
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
 		req.Logs[0].Index, len(req.Logs), server, ok, len(reply.Indexes)))
 
+	peerIndex := rf.getPeerIndex(server)
 	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
 		if ok && rf.isLeader() && len(reply.Indexes) > 0 {
 			rf.sendLogSuccess(*reply.Indexes[len(reply.Indexes)-1], server, -1)
