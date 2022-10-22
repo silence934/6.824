@@ -112,20 +112,24 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 		rf.sendLogSuccess(startIndex-1, server, commitIndex)
 		return
 	}
+	rf.logUpdateLock.RLock()
 	//保证发送的第一个日志是对方期望的
 	peerIndex := rf.getPeerIndex(server)
 	ok, firstLog := rf.entry(startIndex)
 	if !ok {
+		rf.logUpdateLock.RUnlock()
 		return
 	}
 
 	if peerIndex+1 != firstLog.Index {
 		rf.logger.Printf(dError, fmt.Sprintf("sendCoalesceSyncLog failed,ratf[%d] exp:%d ,bug first:%d", server, peerIndex+1, startIndex))
+		rf.logUpdateLock.RUnlock()
 		return
 	}
 
 	ok, preLog := rf.entry(startIndex - 1)
 	if !ok {
+		rf.logUpdateLock.RUnlock()
 		return
 	}
 
@@ -137,10 +141,12 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 		if ok {
 			req.Logs = append(req.Logs, &RequestSyncLogArgs{Index: log.Index, Term: log.Term, Command: log.Command, PreLogTerm: preLog.Term})
 		} else {
+			rf.logUpdateLock.RUnlock()
 			return
 		}
 		preLog = log
 	}
+	rf.logUpdateLock.RUnlock()
 
 	//	todo 	尝试解决空指针问题
 	defer func(args *CoalesceSyncLogArgs) {
@@ -160,12 +166,6 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 		if ok && rf.isLeader() && len(reply.Indexes) > 0 {
 			rf.sendLogSuccess(*reply.Indexes[len(reply.Indexes)-1], server, -1)
 		}
-		//if ok && rf.isLeader() {
-		//	for _, data := range reply.Indexes {
-		//		rf.sendLogSuccess(*data, server, -1)
-		//	}
-		//}
-
 	} else {
 		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", peerIndex, rf.getPeerIndex(server)))
 	}
