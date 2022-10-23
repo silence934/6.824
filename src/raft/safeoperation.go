@@ -75,9 +75,14 @@ func (rf *Raft) stopHeartbeatLoop() {
 
 func (rf *Raft) startHeartbeatLoop() {
 	for _, peer := range rf.peerInfos {
-		//第一次立刻发送心跳
-		peer.heartbeatTicker.Reset(0)
-		peer.heartbeatTicker.Reset(rf.heartbeatInterval)
+		if rf.me != peer.serverId {
+			//第一次立刻发送心跳
+			go func(serverId int) {
+				rf.sendHeartbeat(serverId)
+			}(peer.serverId)
+			//peer.heartbeatTicker.Reset(0)
+			peer.heartbeatTicker.Reset(rf.heartbeatInterval)
+		}
 	}
 }
 
