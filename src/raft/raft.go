@@ -264,16 +264,20 @@ func (rf *Raft) ticker() {
 		if !rf.isLeader() {
 			//rf.logger.Printf(dLog, fmt.Sprintf("ticker timeout  %v  ", time.Now().Sub(rf.lastTime())))
 
+			rf.voteLock.Lock()
 			if !time.Now().After(rf.lastTime().Add(time.Duration(ms) * time.Millisecond)) {
+				rf.voteLock.Unlock()
 				continue
 			}
 
 			if !(rf.setRole(follower, candidate) || rf.setRole(candidate, candidate)) {
+				rf.voteLock.Unlock()
 				continue
 			}
 
 			rf.vote = 1
 			rf.setTerm(rf.term + 1)
+			rf.voteLock.Unlock()
 
 			for i := range rf.peers {
 				if i != rf.me {
