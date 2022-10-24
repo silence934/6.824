@@ -164,7 +164,7 @@ func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSync
 	}
 
 	logs := make([]*LogEntry, len(rf.logs)-rf.logIndex(startIndex))
-	copy(logs, rf.logs[startIndex:])
+	copy(logs, rf.logs[rf.logIndex(startIndex):])
 	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, PreTerm: preLog.Term, Logs: logs}
 
 	return true, &req
