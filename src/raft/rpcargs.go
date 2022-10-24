@@ -79,13 +79,14 @@ type CommitLogReply struct {
 }
 
 type CoalesceSyncLogArgs struct {
-	Id   int
-	Term int32
-	Logs []*RequestSyncLogArgs
+	Id      int
+	Term    int32
+	PreTerm int
+	Logs    []*LogEntry
 }
 
 type CoalesceSyncLogReply struct {
-	Indexes []*int
+	Index int
 }
 
 type InstallSnapshotArgs struct {

@@ -144,37 +144,32 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 	rf.logUpdateLock.Lock()
 	defer rf.logUpdateLock.Unlock()
 
-	reply.Indexes = []*int{}
-	if !rf.isFollower() || req.Term < rf.term {
+	if !rf.isFollower() || req.Term < rf.term || len(req.Logs) == 0 {
 		rf.logger.Printf(dLog, fmt.Sprintf("syncLog failed:%d %d %d", rf.role, req.Id, req.Term))
 		return
 	}
 
 	rf.updateLastTime()
 
-	var lastLog LogEntry
-	for _, args := range req.Logs {
-		index := args.Index
-		preTerm := args.PreLogTerm
+	firstLog := req.Logs[0]
+	lastLog := req.Logs[len(req.Logs)-1]
 
-		ok, preLog := rf.entry(index - 1)
-		if !ok || preLog.Term != preTerm {
-			//要追加的日志不在接受日志范围内(lastIndex,logLength-1)
-			//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
-			rf.logger.Printf(dError, fmt.Sprintf("pre:%v  bug got:%v", preLog, args))
-			return
-		} else {
-			entry := LogEntry{Index: index, Command: args.Command, Term: args.Term}
-			lastLog = entry
-			if rf.logLength() == index {
-				rf.logs = append(rf.logs, entry)
-			} else {
-				rf.logs[rf.logIndex(index)] = entry
-			}
-		}
-		reply.Indexes = append(reply.Indexes, &index)
+	ok, preLog := rf.entry(firstLog.Index - 1)
+	if ok == false || preLog.Term != req.PreTerm {
+		//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
+		rf.logger.Printf(dError, fmt.Sprintf("pre:%v  bug got:%v", preLog, req.PreTerm))
+		return
 	}
 
+	for _, log := range req.Logs {
+		if rf.logLength() == log.Index {
+			rf.logs = append(rf.logs, log)
+		} else {
+			rf.logs[rf.logIndex(log.Index)] = log
+		}
+	}
+
+	reply.Index = lastLog.Index
 	if lastLog.Index < rf.logLength()-1 {
 		ok2, log2 := rf.entry(lastLog.Index + 1)
 		if ok2 && lastLog.Term != log2.Term {
@@ -183,8 +178,8 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		}
 	}
 
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d <-- %d receive=%d",
-		req.Logs[0].Index, len(req.Logs), req.Id, len(reply.Indexes)))
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt [%d,%d] <-- %d receive last index=%d",
+		req.Logs[0].Index, req.Logs[len(req.Logs)-1].Index, req.Id, reply.Index))
 	rf.persist()
 }
 
@@ -213,10 +208,10 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		//或者要追加的日志的前一个日志与要追加日志位置的前一个日志的term不相同：不合法
 		return
 	} else if rf.logLength() == index {
-		rf.logs = append(rf.logs, LogEntry{Index: index, Command: req.Command, Term: req.Term})
+		rf.logs = append(rf.logs, &LogEntry{Index: index, Command: req.Command, Term: req.Term})
 		reply.Accept = true
 	} else {
-		rf.logs[rf.logIndex(index)] = LogEntry{Index: index, Command: req.Command, Term: req.Term}
+		rf.logs[rf.logIndex(index)] = &LogEntry{Index: index, Command: req.Command, Term: req.Term}
 		ok2, log2 := rf.entry(index + 1)
 		if ok2 && req.Term != log2.Term {
 			//去除多余的日志

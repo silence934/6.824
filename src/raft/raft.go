@@ -48,7 +48,6 @@ type LogEntry struct {
 	Index   int
 	Term    int
 	Command interface{}
-	//Complete  []bool
 }
 
 func (t *LogEntry) String() string {
@@ -92,7 +91,7 @@ type Raft struct {
 	lastCallTime time.Time
 	vote         int32 //得票数
 	term         int32
-	logs         []LogEntry
+	logs         []*LogEntry
 	commitIndex  int
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
@@ -147,7 +146,7 @@ func (rf *Raft) readPersist(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var term int32
-	var logs []LogEntry
+	var logs []*LogEntry
 	if d.Decode(&term) != nil || d.Decode(&logs) != nil {
 		rf.logger.Errorf("decode error")
 	} else {
@@ -184,7 +183,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.snapshot = snapshot
 	rf.lastIncludedIndex = lastIncludedIndex
 	rf.lastIncludedTerm = lastIncludedTerm
-	rf.logs = []LogEntry{{Term: lastIncludedTerm, Index: lastIncludedIndex}}
+	rf.logs = []*LogEntry{{Term: lastIncludedTerm, Index: lastIncludedIndex}}
 	rf.persist()
 	return true
 }
@@ -205,9 +204,9 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	//commitIndex不需要修改
 	rf.lastIncludedTerm = rf.logs[rf.logIndex(index)].Term
 	if rf.logIndex(index)+1 == len(rf.logs) {
-		rf.logs = []LogEntry{{Term: rf.lastIncludedTerm, Index: index}}
+		rf.logs = []*LogEntry{{Term: rf.lastIncludedTerm, Index: index}}
 	} else {
-		rf.logs = append([]LogEntry{{Term: rf.lastIncludedTerm, Index: index}}, rf.logs[rf.logIndex(index+1):]...)
+		rf.logs = append([]*LogEntry{{Term: rf.lastIncludedTerm, Index: index}}, rf.logs[rf.logIndex(index+1):]...)
 	}
 	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot index:%d,log length:%d", index, len(rf.logs)))
 	rf.lastIncludedIndex = index
@@ -380,7 +379,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 	rf.role = follower
 	rf.commitIndex = 0
-	rf.logs = []LogEntry{{Term: -1, Index: 0}}
+	rf.logs = []*LogEntry{{Term: -1, Index: 0}}
 
 	rf.applyIndex = 0
 	rf.lastIncludedTerm = -1

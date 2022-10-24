@@ -32,7 +32,7 @@ func (rf *Raft) addLogEntry(entry *LogEntry) int {
 	//fmt.Printf("%d %d\n", len(rf.logs), rf.lastIncludedIndex)
 	index := rf.logLength()
 	entry.Index = index
-	rf.logs = append(rf.logs, *entry)
+	rf.logs = append(rf.logs, entry)
 	rf.persist()
 
 	for i := range rf.peers {
@@ -87,29 +87,29 @@ func (rf *Raft) flushLog(commitIndex int) {
 //	return false
 //}
 
-func (rf *Raft) entry(index int) (b bool, l LogEntry) {
+func (rf *Raft) entry(index int) (b bool, l *LogEntry) {
 	defer func() {
 		//乐观认为可以直接获取，出现并发时直接返回false(小概率事件，可以依赖心跳补偿)
 		if err := recover(); err != nil {
 			rf.logger.Printf(dError, fmt.Sprintf("entry() err:%v", err))
 			b = false
-			l = LogEntry{}
+			l = nil
 		}
-		if l.Index != index {
+		if l != nil && l.Index != index {
 			rf.logger.Printf(dError, fmt.Sprintf("entry() err expIndex:%d ,but got:%d", index, l.Index))
 			b = false
-			l = LogEntry{}
+			l = nil
 		}
 	}()
 	actualIndex := rf.logIndex(index)
 	if actualIndex < 0 || actualIndex >= len(rf.logs) {
 		rf.logger.Printf(dError, fmt.Sprintf("entry() out of range [%d] with capacity [%d,%d]", index, rf.lastIncludedIndex, rf.logLength()-1))
-		return false, LogEntry{Index: -1}
+		return false, nil
 	}
 	return true, rf.logs[actualIndex]
 }
 
-func (rf *Raft) lastEntry() LogEntry {
+func (rf *Raft) lastEntry() *LogEntry {
 	return rf.logs[len(rf.logs)-1]
 }
 
@@ -141,7 +141,7 @@ func (rf *Raft) updateLastTime() {
 	rf.lastCallTime = time.Now()
 }
 
-func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, CoalesceSyncLogArgs) {
+func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSyncLogArgs) {
 
 	rf.logUpdateLock.RLock()
 	defer rf.logUpdateLock.RUnlock()
@@ -150,32 +150,22 @@ func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, CoalesceSyncL
 	peerIndex := rf.getPeerIndex(server)
 	ok, firstLog := rf.entry(startIndex)
 	if !ok {
-		return false, CoalesceSyncLogArgs{}
+		return false, nil
 	}
 
 	if peerIndex+1 != firstLog.Index {
 		rf.logger.Printf(dError, fmt.Sprintf("sendCoalesceSyncLog failed,ratf[%d] exp:%d ,bug first:%d", server, peerIndex+1, startIndex))
-		return false, CoalesceSyncLogArgs{}
+		return false, nil
 	}
 
 	ok, preLog := rf.entry(startIndex - 1)
 	if !ok {
-		return false, CoalesceSyncLogArgs{}
+		return false, nil
 	}
 
-	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, Logs: []*RequestSyncLogArgs{{Index: firstLog.Index, Term: firstLog.Term, Command: firstLog.Command, PreLogTerm: preLog.Term}}}
-	preLog = firstLog
+	logs := make([]*LogEntry, len(rf.logs)-rf.logIndex(startIndex))
+	copy(logs, rf.logs[startIndex:])
+	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, PreTerm: preLog.Term, Logs: logs}
 
-	length := rf.logLength()
-	for i := startIndex + 1; i < length; i++ {
-		t, log := rf.entry(i)
-		if t {
-			req.Logs = append(req.Logs, &RequestSyncLogArgs{Index: log.Index, Term: log.Term, Command: log.Command, PreLogTerm: preLog.Term})
-		} else {
-			return false, CoalesceSyncLogArgs{}
-		}
-		preLog = log
-	}
-
-	return true, req
+	return true, &req
 }

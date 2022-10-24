@@ -70,25 +70,24 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 		logTerm := resp.LogTerm
 
 		ok, log := rf.entry(logIndex)
-		rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v %v", server, resp.String(), log.String()))
 		if !ok {
+			rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v", server, resp.String()))
 			//logIndex不在当前日志范围内
 			if rf.sendInstallSnapshot(server) && rf.updatePeerIndex(server, peerIndex, rf.lastIncludedIndex) {
 				rf.sendHeartbeat(server)
 			}
-		} else if log.Term == logTerm {
-			//日志匹配 发送logIndex之后的所有日志
-			if rf.updatePeerIndex(server, peerIndex, logIndex) {
-				rf.sendCoalesceSyncLog(logIndex+1, server, resp.CommitIndex)
-			}
 		} else {
-			//日志不匹配  重新检测 不必等到下一次心跳 可以提高日志同步速度
-			if rf.updatePeerExpIndex(server, peerExpIndex, int32(resp.FirstIndex-1)) {
+			rf.logger.Printf(dLog, fmt.Sprintf("hb -->[%d] %v %v", server, resp.String(), log.String()))
+			if log.Term == logTerm {
+				//日志匹配 发送logIndex之后的所有日志
+				if rf.updatePeerIndex(server, peerIndex, logIndex) {
+					rf.sendCoalesceSyncLog(logIndex+1, server, resp.CommitIndex)
+				}
+			} else if rf.updatePeerExpIndex(server, peerExpIndex, int32(resp.FirstIndex-1)) {
+				//日志不匹配  重新检测 不必等到下一次心跳 可以提高日志同步速度
 				rf.sendHeartbeat(server)
 			}
-			return true
 		}
-
 		return true
 	}
 
@@ -107,7 +106,7 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 
 	reply := CoalesceSyncLogReply{}
 	ok, req := rf.generateCoalesceLog(startIndex, server)
-	if ok == false {
+	if ok == false || len(req.Logs) == 0 {
 		return
 	}
 
@@ -117,16 +116,16 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 			rf.logger.Printf(dError, fmt.Sprintf("是空指针吗?%v", args))
 			panic(err)
 		}
-	}(&req)
+	}(req)
 
-	ok = rf.call(server, "Raft.CoalesceSyncLog", &req, &reply)
+	ok = rf.call(server, "Raft.CoalesceSyncLog", req, &reply)
 
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
-		startIndex, len(req.Logs), server, ok, len(reply.Indexes)))
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt [%d,%d] --> %d receive last index=%d",
+		req.Logs[0].Index, req.Logs[len(req.Logs)-1].Index, server, reply.Index))
 
-	if rf.updatePeerIndex(server, startIndex-1, startIndex-1+len(reply.Indexes)) {
-		if ok && rf.isLeader() && len(reply.Indexes) > 0 {
-			rf.sendLogSuccess(*reply.Indexes[len(reply.Indexes)-1], server, -1)
+	if rf.updatePeerIndex(server, startIndex-1, reply.Index) {
+		if ok && rf.isLeader() && reply.Index > 0 {
+			rf.sendLogSuccess(reply.Index, server, -1)
 		}
 	} else {
 		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", startIndex-1, rf.getPeerIndex(server)))
@@ -178,7 +177,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 		select {
 		case rf.peerInfos[server].commitChannel <- &args:
 			//todo 寻找不提交的问题
-			rf.logger.Printf(dCommit, fmt.Sprintf("commit to buffer[%d %d]", server, commitIndex))
+			//rf.logger.Printf(dCommit, fmt.Sprintf("commit to buffer[%d %d]", server, commitIndex))
 		default:
 		}
 	}
@@ -186,7 +185,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 
 func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 	if rf.isLeader() {
-		rf.logger.Printf(dCommit, fmt.Sprintf("send log to[%d] %d success", server, index))
+		rf.logger.Printf(dTimer, fmt.Sprintf("send log[index:%d] to[%d]  success", index, server))
 		if rf.commitIndex >= index {
 			if index > commitIndex {
 				rf.sendCommitLogToBuffer(index, server)
