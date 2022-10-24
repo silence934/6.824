@@ -172,6 +172,10 @@ func (rf *Raft) resetHeartbeatCheck() {
 }
 
 func (rf *Raft) checkHeartbeatTimeout() {
+	if rf.killed() {
+		rf.heartbeatTicker.Stop()
+		return
+	}
 	if !rf.isLeader() {
 		rf.voteLock.Lock()
 		defer rf.voteLock.Unlock()
