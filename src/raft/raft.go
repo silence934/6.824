@@ -244,6 +244,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	rf.stopHeartbeatLoop()
+	rf.heartbeatTicker.Stop()
 	rf.logger.Printf(dDrop, "raft node killed")
 	// Your code here, if desired.
 }
