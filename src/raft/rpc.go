@@ -146,7 +146,7 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 
 	reply.Indexes = []*int{}
 	if !rf.isFollower() || req.Term < rf.term {
-		rf.logger.Printf(dLog, fmt.Sprintf("syncLog failed:%d %d %d", rf.role, rf.term, req.Term))
+		rf.logger.Printf(dLog, fmt.Sprintf("syncLog failed:%d %d %d", rf.role, req.Id, req.Term))
 		return
 	}
 
@@ -177,7 +177,7 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 
 	if lastLog.Index < rf.logLength()-1 {
 		ok2, log2 := rf.entry(lastLog.Index + 1)
-		if ok2 && lastLog.Term > log2.Term {
+		if ok2 && lastLog.Term != log2.Term {
 			//去除多余的日志
 			rf.logs = rf.logs[:rf.logIndex(lastLog.Index+1)]
 		}
@@ -218,7 +218,7 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 	} else {
 		rf.logs[rf.logIndex(index)] = LogEntry{Index: index, Command: req.Command, Term: req.Term}
 		ok2, log2 := rf.entry(index + 1)
-		if ok2 && req.Term > log2.Term {
+		if ok2 && req.Term != log2.Term {
 			//去除多余的日志
 			rf.logs = rf.logs[:rf.logIndex(index+1)]
 		}
