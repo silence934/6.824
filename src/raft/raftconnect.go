@@ -107,7 +107,7 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 
 	reply := CoalesceSyncLogReply{}
 	ok, req := rf.generateCoalesceLog(startIndex, server)
-	if !ok {
+	if ok == false {
 		return
 	}
 
@@ -124,13 +124,12 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt startIndex=%d length=%d -->%d  %v receive=%d",
 		startIndex, len(req.Logs), server, ok, len(reply.Indexes)))
 
-	peerIndex := rf.getPeerIndex(server)
-	if rf.updatePeerIndex(server, peerIndex, peerIndex+len(reply.Indexes)) {
+	if rf.updatePeerIndex(server, startIndex-1, startIndex-1+len(reply.Indexes)) {
 		if ok && rf.isLeader() && len(reply.Indexes) > 0 {
 			rf.sendLogSuccess(*reply.Indexes[len(reply.Indexes)-1], server, -1)
 		}
 	} else {
-		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", peerIndex, rf.getPeerIndex(server)))
+		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", startIndex-1, rf.getPeerIndex(server)))
 	}
 }
 
@@ -156,6 +155,8 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 
 	if ok && reply.Accept && rf.updatePeerIndex(server, peerIndex, entry.Index) {
 		rf.sendLogSuccess(entry.Index, server, -1)
+	} else {
+		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", peerIndex, rf.getPeerIndex(server)))
 	}
 }
 
@@ -185,7 +186,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 
 func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 	if rf.isLeader() {
-		rf.logger.Printf(dCommit, fmt.Sprintf("send log[%d %d] success", server, index))
+		rf.logger.Printf(dCommit, fmt.Sprintf("send log to[%d] %d success", server, index))
 		if rf.commitIndex >= index {
 			if index > commitIndex {
 				rf.sendCommitLogToBuffer(index, server)
