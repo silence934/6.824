@@ -30,6 +30,7 @@ func (rf *Raft) sendRequestVote(server int) bool {
 		v := atomic.AddInt32(&rf.vote, 1)
 		if int(v) > len(rf.peers)/2 {
 			if rf.initPeerInfos() && rf.setRole(candidate, leader) {
+				rf.heartbeatTicker.Stop()
 				rf.logger.Printf(dLog, fmt.Sprintf("==> leader"))
 			}
 		}

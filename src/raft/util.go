@@ -2,6 +2,7 @@ package raft
 
 import (
 	"fmt"
+	"math/rand"
 	"time"
 )
 
@@ -137,10 +138,6 @@ func (rf *Raft) lastTime() time.Time {
 	return rf.lastCallTime
 }
 
-func (rf *Raft) updateLastTime() {
-	rf.lastCallTime = time.Now()
-}
-
 func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSyncLogArgs) {
 
 	rf.logUpdateLock.RLock()
@@ -168,4 +165,27 @@ func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSync
 	req := CoalesceSyncLogArgs{Id: rf.me, Term: rf.term, PreTerm: preLog.Term, Logs: logs}
 
 	return true, &req
+}
+
+func (rf *Raft) resetHeartbeatCheck() {
+	rf.heartbeatTicker.Reset(time.Duration(165+(rand.Int63()%150)) * time.Millisecond)
+}
+
+func (rf *Raft) checkHeartbeatTimeout() {
+	if !rf.isLeader() {
+		rf.voteLock.Lock()
+		defer rf.voteLock.Unlock()
+
+		rf.resetHeartbeatCheck()
+		if rf.setRole(follower, candidate) || rf.setRole(candidate, candidate) {
+			rf.vote = 1
+			rf.setTerm(rf.term + 1)
+
+			for i := range rf.peers {
+				if i != rf.me {
+					go rf.sendRequestVote(i)
+				}
+			}
+		}
+	}
 }

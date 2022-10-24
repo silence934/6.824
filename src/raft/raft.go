@@ -68,13 +68,13 @@ type peerInfo struct {
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	mu            *sync.Mutex
-	initPeers     int32
-	voteLock      *sync.Mutex
-	commitLogLock *sync.Mutex
-	persistLock   *sync.Mutex
-	logUpdateLock *sync.RWMutex
-	heartbeat     *time.Ticker
+	mu              *sync.Mutex
+	initPeers       int32
+	voteLock        *sync.Mutex
+	commitLogLock   *sync.Mutex
+	persistLock     *sync.Mutex
+	logUpdateLock   *sync.RWMutex
+	heartbeatTicker *time.Ticker
 
 	peers             []*labrpc.ClientEnd // RPC end points of all peers
 	persister         *Persister          // Object to hold this peer's persisted state
@@ -256,35 +256,8 @@ func (rf *Raft) killed() bool {
 // The ticker go routine starts a new election if this peer hasn't received
 // heartsbeats recently.
 func (rf *Raft) ticker() {
-	for rf.killed() == false {
-		ms := 165 + (rand.Int63() % 150)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
-
-		//logger.Debugf("raft[%d-%d] ms call time:%v", rf.me, rf.role, rf.lastCallTime)
-		if !rf.isLeader() {
-			//rf.logger.Printf(dLog, fmt.Sprintf("ticker timeout  %v  ", time.Now().Sub(rf.lastTime())))
-
-			if !time.Now().After(rf.lastTime().Add(time.Duration(ms) * time.Millisecond)) {
-				continue
-			}
-
-			if !(rf.setRole(follower, candidate) || rf.setRole(candidate, candidate)) {
-				continue
-			}
-
-			rf.vote = 1
-			rf.setTerm(rf.term + 1)
-
-			for i := range rf.peers {
-				if i != rf.me {
-					go rf.sendRequestVote(i)
-				}
-			}
-
-		}
-		// Your code here to check if a leader election should
-		// be started and to randomize sleeping time using
-		// time.Sleep().
+	for range rf.heartbeatTicker.C {
+		rf.checkHeartbeatTimeout()
 	}
 }
 
@@ -375,6 +348,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.commitLogLock = &sync.Mutex{}
 	rf.mu = &sync.Mutex{}
 	rf.heartbeatInterval = 150 * time.Millisecond
+	rf.heartbeatTicker = time.NewTicker(time.Duration(165+(rand.Int63()%150)) * time.Millisecond)
 
 	rf.applyCh = applyCh
 	rf.role = follower

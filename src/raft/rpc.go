@@ -28,7 +28,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.role = follower
 			rf.setTerm(term)
 			if rf.acceptVote(args) {
-				rf.updateLastTime()
+				rf.resetHeartbeatCheck()
 				rf.stopHeartbeatLoop()
 				reply.Accept = true
 			} else {
@@ -48,7 +48,7 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 	term := rf.term
 	//reply.RespTime = time.Now().UnixMilli()
 	if term <= args.Term {
-		rf.updateLastTime()
+		rf.resetHeartbeatCheck()
 		rf.role = follower
 		rf.setTerm(args.Term)
 
@@ -129,7 +129,7 @@ func (rf *Raft) CommitLog(args *CommitLogArgs, reply *CommitLogReply) {
 		return
 	}
 
-	rf.updateLastTime()
+	rf.resetHeartbeatCheck()
 
 	rf.logger.Printf(dCommit, fmt.Sprintf("commit log Index:%+v applyIndex:%d", log.Index, rf.applyIndex))
 
@@ -149,7 +149,7 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		return
 	}
 
-	rf.updateLastTime()
+	rf.resetHeartbeatCheck()
 
 	firstLog := req.Logs[0]
 	lastLog := req.Logs[len(req.Logs)-1]
@@ -196,7 +196,7 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		return
 	}
 
-	rf.updateLastTime()
+	rf.resetHeartbeatCheck()
 
 	index := req.Index
 	preTerm := req.PreLogTerm
