@@ -40,7 +40,7 @@ func (rf *Raft) sendRequestVote(server int) bool {
 
 func (rf *Raft) sendHeartbeat(server int) bool {
 
-	if !rf.isLeader() {
+	if !rf.isLeader() || rf.killed() == true {
 		return false
 	}
 
