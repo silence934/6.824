@@ -68,8 +68,6 @@ type peerInfo struct {
 // A Go object implementing a single Raft peer.
 //
 type Raft struct {
-	mu            *sync.Mutex
-	initPeers     int32
 	voteLock      *sync.Mutex
 	commitLogLock *sync.Mutex
 	persistLock   *sync.Mutex
@@ -377,7 +375,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.voteLock = &sync.Mutex{}
 	rf.persistLock = &sync.Mutex{}
 	rf.commitLogLock = &sync.Mutex{}
-	rf.mu = &sync.Mutex{}
 	rf.heartbeatInterval = 150 * time.Millisecond
 
 	rf.applyCh = applyCh

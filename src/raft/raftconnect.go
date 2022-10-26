@@ -29,7 +29,8 @@ func (rf *Raft) sendRequestVote(server int) bool {
 	if reply.Accept {
 		v := atomic.AddInt32(&rf.vote, 1)
 		if int(v) > len(rf.peers)/2 {
-			if rf.initPeerInfos() && rf.setRole(candidate, leader) {
+			if rf.setRole(candidate, leader) {
+				rf.initPeerInfos()
 				rf.logger.Printf(dLog, fmt.Sprintf("==> leader"))
 			}
 		}

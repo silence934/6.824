@@ -52,19 +52,14 @@ func (rf *Raft) isFollower() bool {
 	return rf.getRole() == follower
 }
 
-func (rf *Raft) initPeerInfos() bool {
-	if rf.role == candidate && atomic.CompareAndSwapInt32(&rf.initPeers, 0, 1) {
-		defer func() { rf.initPeers = 0 }()
-		index := rf.lastIncludedIndex
-		for _, d := range rf.peerInfos {
-			d.index = index
-			d.expIndex = int32(rf.logLength() - 1)
-			d.commitChannel = make(chan *CommitLogArgs, 20)
-		}
-		rf.startHeartbeatLoop()
-		return true
+func (rf *Raft) initPeerInfos() {
+	index := rf.lastIncludedIndex
+	for _, d := range rf.peerInfos {
+		d.index = index
+		d.expIndex = int32(rf.logLength() - 1)
+		d.commitChannel = make(chan *CommitLogArgs, 20)
 	}
-	return false
+	rf.startHeartbeatLoop()
 }
 
 func (rf *Raft) stopHeartbeatLoop() {
