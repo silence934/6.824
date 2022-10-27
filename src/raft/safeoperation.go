@@ -36,20 +36,16 @@ func (rf *Raft) setPeerIndex(server, index int) {
 	rf.peerInfos[server].index = index
 }
 
-func (rf *Raft) getRole() int32 {
-	return atomic.LoadInt32(&rf.role)
-}
-
 func (rf *Raft) setRole(old, new int32) bool {
 	return atomic.CompareAndSwapInt32(&rf.role, old, new)
 }
 
 func (rf *Raft) isLeader() bool {
-	return rf.getRole() == leader
+	return atomic.LoadInt32(&rf.role) == leader
 }
 
 func (rf *Raft) isFollower() bool {
-	return rf.getRole() == follower
+	return atomic.LoadInt32(&rf.role) == follower
 }
 
 func (rf *Raft) initPeerInfos() {

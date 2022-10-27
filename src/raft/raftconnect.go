@@ -111,14 +111,6 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 		return
 	}
 
-	//	todo 	尝试解决空指针问题
-	defer func(args *CoalesceSyncLogArgs) {
-		if err := recover(); err != nil {
-			rf.logger.Printf(dError, fmt.Sprintf("是空指针吗?%v", args))
-			panic(err)
-		}
-	}(req)
-
 	ok = rf.call(server, "Raft.CoalesceSyncLog", req, &reply)
 
 	rf.logger.Printf(dLog2, fmt.Sprintf("lt [%d,%d] --> %d receive last index=%d",
@@ -161,8 +153,7 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 }
 
 func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
-	//args := CommitLogArgs{Id: rf.me, Term: rf.term, CommitIndex: int32(commitIndex), CommitLogTerm: rf.logs[commitIndex].Term}
-	//	go rf.peers[server].Call("Raft.CommitLog", &args, &CommitLogReply{})
+
 	ok, log := rf.entry(commitIndex)
 	if !ok {
 		//此时可能已经生成了日志快照
@@ -177,7 +168,6 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 	} else {
 		select {
 		case rf.peerInfos[server].commitChannel <- &args:
-			//todo 寻找不提交的问题
 			//rf.logger.Printf(dCommit, fmt.Sprintf("commit to buffer[%d %d]", server, commitIndex))
 		default:
 		}

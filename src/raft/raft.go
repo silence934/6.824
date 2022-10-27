@@ -59,7 +59,6 @@ type peerInfo struct {
 	index           int //对方和自己相同的日志下标
 	expIndex        int32
 	updateIndexLock *sync.RWMutex
-	//channel         chan RequestSyncLogArgs //日志同步缓存channel
 	commitChannel   chan *CommitLogArgs //日志提交缓存
 	heartbeatTicker *time.Ticker
 }
@@ -80,9 +79,8 @@ type Raft struct {
 	logger            Log
 	heartbeatInterval time.Duration
 
-	me         int // this peer's Index into peers[]
-	applyIndex int //刷入applyCh的下标
-	role       int32
+	me   int // this peer's Index into peers[]
+	role int32
 
 	applyCh      chan ApplyMsg
 	peerInfos    []*peerInfo
@@ -90,10 +88,8 @@ type Raft struct {
 	vote         int32 //得票数
 	term         int32
 	logs         []*LogEntry
+	applyIndex   int //刷入applyCh的下标
 	commitIndex  int
-	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
 
 	lastIncludedTerm  int
 	lastIncludedIndex int
