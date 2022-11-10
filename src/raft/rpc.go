@@ -57,7 +57,7 @@ func (rf *Raft) Heartbeat(args *RequestHeartbeatArgs, reply *RequestHeartbeatRep
 
 		length := rf.logLength()
 		reqIndex := args.Index
-		rf.logger.Printf(dLog, fmt.Sprintf("hb <-- id:%d index:%d  ,my length:%d", args.Id, reqIndex, length))
+		rf.logger.Printf(dLog, fmt.Sprintf("hb <-- id:%d matchIndex:%d  ,my length:%d", args.Id, reqIndex, length))
 		ok, log := rf.entry(reqIndex)
 		if ok {
 			reply.LogTerm = log.Term
@@ -178,7 +178,7 @@ func (rf *Raft) CoalesceSyncLog(req *CoalesceSyncLogArgs, reply *CoalesceSyncLog
 		}
 	}
 
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt [%d,%d] <-- %d receive last index=%d",
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt [%d,%d] <-- %d receive last matchIndex=%d",
 		req.Logs[0].Index, req.Logs[len(req.Logs)-1].Index, req.Id, reply.Index))
 	rf.persist()
 }
@@ -219,7 +219,7 @@ func (rf *Raft) AppendLog(req *RequestSyncLogArgs, reply *RequestSyncLogReply) {
 		}
 		reply.Accept = true
 	}
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt index=%d resp:%v <--", req.Index, reply.Accept))
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt matchIndex=%d resp:%v <--", req.Index, reply.Accept))
 	rf.persist()
 }
 
@@ -243,5 +243,5 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		SnapshotIndex: args.LastIncludedIndex,
 	}
 
-	rf.logger.Printf(dSnap, fmt.Sprintf("IS<--%d index:%d success", args.Id, args.LastIncludedIndex))
+	rf.logger.Printf(dSnap, fmt.Sprintf("IS<--%d matchIndex:%d success", args.Id, args.LastIncludedIndex))
 }

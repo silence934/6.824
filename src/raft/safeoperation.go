@@ -4,27 +4,27 @@ import (
 	"sync/atomic"
 )
 
-func (rf *Raft) updatePeerExpIndex(server int, older, new int32) bool {
-	return atomic.CompareAndSwapInt32(&rf.peerInfos[server].expIndex, older, new)
-}
-
-func (rf *Raft) getPeerExpIndex(server int) int32 {
-	return atomic.LoadInt32(&rf.peerInfos[server].expIndex)
-}
-
-func (rf *Raft) getPeerIndex(server int) int {
+func (rf *Raft) getPeerExpIndex(server int) int {
 	rf.peerInfos[server].updateIndexLock.RLock()
 	defer rf.peerInfos[server].updateIndexLock.RUnlock()
-	return rf.peerInfos[server].index
+	return rf.peerInfos[server].expIndex
+}
+
+func (rf *Raft) getPeerMatchIndex(server int) int {
+	//更新match index和 exp index 不可以同时进行
+	rf.peerInfos[server].updateIndexLock.RLock()
+	defer rf.peerInfos[server].updateIndexLock.RUnlock()
+	return rf.peerInfos[server].matchIndex
 }
 
 func (rf *Raft) updatePeerIndex(server, older, new int) bool {
+	//更新match index和 exp index 不可以同时进行
 	rf.peerInfos[server].updateIndexLock.Lock()
 	defer rf.peerInfos[server].updateIndexLock.Unlock()
 	peer := rf.peerInfos[server]
-	if peer.index == older {
-		peer.index = new
-		rf.peerInfos[server].expIndex = int32(new)
+	if peer.matchIndex == older {
+		peer.matchIndex = new
+		peer.expIndex = new
 		return true
 	}
 	return false
@@ -33,7 +33,7 @@ func (rf *Raft) updatePeerIndex(server, older, new int) bool {
 func (rf *Raft) setPeerIndex(server, index int) {
 	rf.peerInfos[server].updateIndexLock.Lock()
 	defer rf.peerInfos[server].updateIndexLock.Unlock()
-	rf.peerInfos[server].index = index
+	rf.peerInfos[server].matchIndex = index
 }
 
 func (rf *Raft) setRole(old, new int32) bool {
@@ -49,10 +49,11 @@ func (rf *Raft) isFollower() bool {
 }
 
 func (rf *Raft) initPeerInfos() {
-	index := rf.lastIncludedIndex
+	matchIndex := rf.lastIncludedIndex
+	expIndex := rf.logLength() - 1
 	for _, d := range rf.peerInfos {
-		d.index = index
-		d.expIndex = int32(rf.logLength() - 1)
+		d.matchIndex = matchIndex
+		d.expIndex = expIndex
 		d.commitChannel = make(chan *CommitLogArgs, 20)
 	}
 	rf.startHeartbeatLoop()

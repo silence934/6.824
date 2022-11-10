@@ -72,11 +72,11 @@ func (rf *Raft) flushLog(commitIndex int) {
 //	return 1
 //}
 //
-//func (rf *Raft) test(n, index int) bool {
+//func (rf *Raft) test(n, matchIndex int) bool {
 //	count := 1
 //
 //	for _, d := range rf.peerInfos {
-//		if d.index >= index {
+//		if d.matchIndex >= matchIndex {
 //			count++
 //			if count >= n {
 //				return true
@@ -117,8 +117,8 @@ func (rf *Raft) logIndex(realIndex int) int {
 	return realIndex - rf.lastIncludedIndex
 }
 
-//func (rf *Raft) setLog(log *LogEntry, index int) {
-//	rf.logs[rf.logIndex(index)] = *log
+//func (rf *Raft) setLog(log *LogEntry, matchIndex int) {
+//	rf.logs[rf.logIndex(matchIndex)] = *log
 //	rf.persist()
 //}
 
@@ -147,7 +147,7 @@ func (rf *Raft) generateCoalesceLog(startIndex, server int) (bool, *CoalesceSync
 	defer rf.logUpdateLock.RUnlock()
 
 	//保证发送的第一个日志是对方期望的
-	peerIndex := rf.getPeerIndex(server)
+	peerIndex := rf.getPeerMatchIndex(server)
 	ok, firstLog := rf.entry(startIndex)
 	if !ok {
 		return false, nil

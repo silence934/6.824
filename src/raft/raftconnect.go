@@ -46,7 +46,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 	}
 
 	term := rf.term
-	peerIndex := rf.getPeerIndex(server)
+	peerIndex := rf.getPeerMatchIndex(server)
 	peerExpIndex := rf.getPeerExpIndex(server)
 	req := RequestHeartbeatArgs{Id: rf.me, Term: term, Index: int(peerExpIndex)}
 
@@ -84,7 +84,7 @@ func (rf *Raft) sendHeartbeat(server int) bool {
 				if rf.updatePeerIndex(server, peerIndex, logIndex) {
 					rf.sendCoalesceSyncLog(logIndex+1, server, resp.CommitIndex)
 				}
-			} else if rf.updatePeerExpIndex(server, peerExpIndex, int32(resp.FirstIndex-1)) {
+			} else if rf.updatePeerIndex(server, peerExpIndex, resp.FirstIndex-1) {
 				//日志不匹配  重新检测 不必等到下一次心跳 可以提高日志同步速度
 				rf.sendHeartbeat(server)
 			}
@@ -113,7 +113,7 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 
 	ok = rf.call(server, "Raft.CoalesceSyncLog", req, &reply)
 
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt [%d,%d] --> %d receive last index=%d",
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt [%d,%d] --> %d receive last matchIndex=%d",
 		req.Logs[0].Index, req.Logs[len(req.Logs)-1].Index, server, reply.Index))
 
 	if rf.updatePeerIndex(server, startIndex-1, reply.Index) {
@@ -121,14 +121,14 @@ func (rf *Raft) sendCoalesceSyncLog(startIndex, server, commitIndex int) {
 			rf.sendLogSuccess(reply.Index, server, -1)
 		}
 	} else {
-		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", startIndex-1, rf.getPeerIndex(server)))
+		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", startIndex-1, rf.getPeerMatchIndex(server)))
 	}
 }
 
 func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 
 	//保证发送的是对方期望的
-	peerIndex := rf.getPeerIndex(server)
+	peerIndex := rf.getPeerMatchIndex(server)
 	if peerIndex+1 != entry.Index {
 		return
 	}
@@ -143,12 +143,12 @@ func (rf *Raft) sendLogEntry(server int, entry *LogEntry) {
 
 	//rf.mu.Lock()
 	//defer rf.mu.Unlock()
-	rf.logger.Printf(dLog2, fmt.Sprintf("lt index:%d -->%d %v", req.Index, server, reply.Accept))
+	rf.logger.Printf(dLog2, fmt.Sprintf("lt matchIndex:%d -->%d %v", req.Index, server, reply.Accept))
 
 	if ok && reply.Accept && rf.updatePeerIndex(server, peerIndex, entry.Index) {
 		rf.sendLogSuccess(entry.Index, server, -1)
 	} else {
-		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", peerIndex, rf.getPeerIndex(server)))
+		rf.logger.Printf(dError, fmt.Sprintf("peerIndex has been modified,exp:%d,but it is:%d", peerIndex, rf.getPeerMatchIndex(server)))
 	}
 }
 
@@ -163,7 +163,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 	if server == rf.me {
 		args.Id = rf.me
 		args.Term = rf.term
-		rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d index:%d", server, args.CommitIndex))
+		rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d matchIndex:%d", server, args.CommitIndex))
 		go rf.CommitLog(&args, &CommitLogReply{})
 	} else {
 		select {
@@ -176,7 +176,7 @@ func (rf *Raft) sendCommitLogToBuffer(commitIndex, server int) {
 
 func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 	if rf.isLeader() {
-		rf.logger.Printf(dTimer, fmt.Sprintf("send log[index:%d] to[%d]  success", index, server))
+		rf.logger.Printf(dTimer, fmt.Sprintf("send log[matchIndex:%d] to[%d]  success", index, server))
 		if rf.commitIndex >= index {
 			if index > commitIndex {
 				rf.sendCommitLogToBuffer(index, server)
@@ -191,7 +191,7 @@ func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 		count := 1
 
 		for _, d := range rf.peerInfos {
-			if d.index >= index {
+			if d.matchIndex >= index {
 				count++
 			}
 		}
@@ -202,7 +202,7 @@ func (rf *Raft) sendLogSuccess(index, server, commitIndex int) {
 				//第一次到达一半的时候，向之前同步完成的节点发送提交请求
 				rf.sendCommitLogToBuffer(index, rf.me)
 				for _, d := range rf.peerInfos {
-					if d.index >= index {
+					if d.matchIndex >= index {
 						rf.sendCommitLogToBuffer(log.Index, d.serverId)
 					}
 				}
@@ -239,7 +239,7 @@ func (rf *Raft) sendInstallSnapshot(server int) bool {
 	//	rf.logger.Errorf("decode error")
 	//}
 
-	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d index:%d ", server, rf.lastIncludedIndex))
+	rf.logger.Printf(dSnap, fmt.Sprintf("sendIS-->%d matchIndex:%d ", server, rf.lastIncludedIndex))
 	ok := rf.call(server, "Raft.InstallSnapshot", &args, &reply)
 
 	return ok && reply.Accept

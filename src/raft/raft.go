@@ -56,8 +56,8 @@ func (t *LogEntry) String() string {
 
 type peerInfo struct {
 	serverId        int
-	index           int //对方和自己相同的日志下标
-	expIndex        int32
+	matchIndex      int //对方和自己相同的日志下标
+	expIndex        int
 	updateIndexLock *sync.RWMutex
 	commitChannel   chan *CommitLogArgs //日志提交缓存
 	heartbeatTicker *time.Ticker
@@ -192,7 +192,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	if index <= rf.lastIncludedIndex {
 		return
 	}
-	//rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot %d", index))
+	//rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot %d", matchIndex))
 
 	rf.snapshot = snapshot
 	//commitIndex不需要修改
@@ -202,7 +202,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	} else {
 		rf.logs = append([]*LogEntry{{Term: rf.lastIncludedTerm, Index: index}}, rf.logs[rf.logIndex(index+1):]...)
 	}
-	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot index:%d,log length:%d", index, len(rf.logs)))
+	rf.logger.Printf(dSnap, fmt.Sprintf("Snapshot matchIndex:%d,log length:%d", index, len(rf.logs)))
 	rf.lastIncludedIndex = index
 	rf.persist()
 }
@@ -346,10 +346,10 @@ func (rf *Raft) logBufferLoop() {
 
 					if args.CommitIndex != -1 {
 						go func(serverId int, args *CommitLogArgs) {
-							rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d index:%d", serverId, args.CommitIndex))
+							rf.logger.Printf(dCommit, fmt.Sprintf("send commit -->%d matchIndex:%d", serverId, args.CommitIndex))
 							ok := rf.call(serverId, "Raft.CommitLog", args, &CommitLogReply{})
 							if !ok {
-								rf.logger.Printf(dTimer, fmt.Sprintf("send commit -->%d index:%d fail", serverId, args.CommitIndex))
+								rf.logger.Printf(dTimer, fmt.Sprintf("send commit -->%d matchIndex:%d fail", serverId, args.CommitIndex))
 							}
 						}(server, &args)
 					}
